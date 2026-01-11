@@ -92,7 +92,7 @@ WeFlow/
 
 ## 致谢
 
-- [miyu](https://github.com/ILoveBingLu/miyu) 为本项目提供了基础框架
+- [密语 CipherTalk](https://github.com/ILoveBingLu/miyu) 为本项目提供了基础框架
 
 
 ## Star History
