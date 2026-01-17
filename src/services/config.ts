@@ -20,7 +20,8 @@ export const CONFIG_KEYS = {
   IMAGE_AES_KEY: 'imageAesKey',
   WHISPER_MODEL_NAME: 'whisperModelName',
   WHISPER_MODEL_DIR: 'whisperModelDir',
-  WHISPER_DOWNLOAD_SOURCE: 'whisperDownloadSource'
+  WHISPER_DOWNLOAD_SOURCE: 'whisperDownloadSource',
+  AUTO_TRANSCRIBE_VOICE: 'autoTranscribeVoice'
 } as const
 
 // 获取解密密钥
@@ -217,4 +218,16 @@ export async function getOnboardingDone(): Promise<boolean> {
 // 设置首次配置引导完成
 export async function setOnboardingDone(done: boolean): Promise<void> {
   await config.set(CONFIG_KEYS.ONBOARDING_DONE, done)
+}
+
+// 获取是否自动转文字
+export async function getAutoTranscribeVoice(): Promise<boolean> {
+  const value = await config.get(CONFIG_KEYS.AUTO_TRANSCRIBE_VOICE)
+  // 默认为 true
+  return value !== false
+}
+
+// 设置是否自动转文字
+export async function setAutoTranscribeVoice(enabled: boolean): Promise<void> {
+  await config.set(CONFIG_KEYS.AUTO_TRANSCRIBE_VOICE, enabled)
 }

@@ -215,18 +215,54 @@ function ExportPage() {
     const year = calendarDate.getFullYear()
     const month = calendarDate.getMonth()
     const selectedDate = new Date(year, month, day)
+    // 设置时间为当天的开始或结束
+    selectedDate.setHours(selectingStart ? 0 : 23, selectingStart ? 0 : 59, selectingStart ? 0 : 59, selectingStart ? 0 : 999)
+
+    const now = new Date()
+    // 如果选择的日期晚于当前时间，限制为当前时间
+    if (selectedDate > now) {
+      selectedDate.setTime(now.getTime())
+    }
 
     if (selectingStart) {
-      setOptions({
-        ...options,
-        dateRange: options.dateRange ? { ...options.dateRange, start: selectedDate } : { start: selectedDate, end: new Date() }
-      })
+      // 选择开始日期
+      const currentEnd = options.dateRange?.end || new Date()
+      // 如果选择的开始日期晚于结束日期，则同时更新结束日期
+      if (selectedDate > currentEnd) {
+        const newEnd = new Date(selectedDate)
+        newEnd.setHours(23, 59, 59, 999)
+        // 确保结束日期也不晚于当前时间
+        if (newEnd > now) {
+          newEnd.setTime(now.getTime())
+        }
+        setOptions({
+          ...options,
+          dateRange: { start: selectedDate, end: newEnd }
+        })
+      } else {
+        setOptions({
+          ...options,
+          dateRange: options.dateRange ? { ...options.dateRange, start: selectedDate } : { start: selectedDate, end: new Date() }
+        })
+      }
       setSelectingStart(false)
     } else {
-      setOptions({
-        ...options,
-        dateRange: options.dateRange ? { ...options.dateRange, end: selectedDate } : { start: new Date(), end: selectedDate }
-      })
+      // 选择结束日期
+      const currentStart = options.dateRange?.start || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      // 如果选择的结束日期早于开始日期，则同时更新开始日期
+      if (selectedDate < currentStart) {
+        const newStart = new Date(selectedDate)
+        newStart.setHours(0, 0, 0, 0)
+        setOptions({
+          ...options,
+          dateRange: { start: newStart, end: selectedDate }
+        })
+      } else {
+        setOptions({
+          ...options,
+          dateRange: options.dateRange ? { ...options.dateRange, end: selectedDate } : { start: new Date(), end: selectedDate }
+        })
+      }
       setSelectingStart(true)
     }
   }
@@ -547,6 +583,9 @@ function ExportPage() {
         <div className="export-overlay" onClick={() => setShowDatePicker(false)}>
           <div className="date-picker-modal" onClick={e => e.stopPropagation()}>
             <h3>选择时间范围</h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '8px 0 16px 0' }}>
+              点击选择开始和结束日期，系统会自动调整确保时间顺序正确
+            </p>
             <div className="quick-select">
               <button
                 className="quick-btn"
@@ -641,12 +680,16 @@ function ExportPage() {
                   const isStart = options.dateRange?.start.toDateString() === currentDate.toDateString()
                   const isEnd = options.dateRange?.end.toDateString() === currentDate.toDateString()
                   const isInRange = options.dateRange && currentDate >= options.dateRange.start && currentDate <= options.dateRange.end
+                  const today = new Date()
+                  today.setHours(0, 0, 0, 0)
+                  const isFuture = currentDate > today
 
                   return (
                     <div
                       key={day}
-                      className={`calendar-day ${isStart ? 'start' : ''} ${isEnd ? 'end' : ''} ${isInRange ? 'in-range' : ''}`}
-                      onClick={() => handleDateSelect(day)}
+                      className={`calendar-day ${isStart ? 'start' : ''} ${isEnd ? 'end' : ''} ${isInRange ? 'in-range' : ''} ${isFuture ? 'disabled' : ''}`}
+                      onClick={() => !isFuture && handleDateSelect(day)}
+                      style={{ cursor: isFuture ? 'not-allowed' : 'pointer', opacity: isFuture ? 0.3 : 1 }}
                     >
                       {day}
                     </div>

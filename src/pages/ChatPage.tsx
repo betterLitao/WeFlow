@@ -5,6 +5,7 @@ import { useChatStore } from '../stores/chatStore'
 import type { ChatSession, Message } from '../types/models'
 import { getEmojiPath } from 'wechat-emojis'
 import { ImagePreview } from '../components/ImagePreview'
+import * as configService from '../services/config'
 import './ChatPage.scss'
 
 interface ChatPageProps {
@@ -1317,6 +1318,16 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat }:
   const [voiceTranscriptError, setVoiceTranscriptError] = useState(false)
   const voiceTranscriptRequestedRef = useRef(false)
   const [showImagePreview, setShowImagePreview] = useState(false)
+  const [autoTranscribeVoice, setAutoTranscribeVoice] = useState(true)
+
+  // 加载自动转文字配置
+  useEffect(() => {
+    const loadConfig = async () => {
+      const enabled = await configService.getAutoTranscribeVoice()
+      setAutoTranscribeVoice(enabled)
+    }
+    loadConfig()
+  }, [])
 
   // 从缓存获取表情包 data URL
   const cacheKey = message.emojiMd5 || message.emojiCdnUrl || ''
@@ -1638,10 +1649,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat }:
   useEffect(() => {
     if (!isVoice) return
     if (!voiceDataUrl) return
+    if (!autoTranscribeVoice) return // 如果自动转文字已关闭，不自动转文字
     if (voiceTranscriptError) return
     if (voiceTranscriptLoading || voiceTranscript !== undefined || voiceTranscriptRequestedRef.current) return
     void requestVoiceTranscript()
-  }, [isVoice, voiceDataUrl, voiceTranscript, voiceTranscriptError, voiceTranscriptLoading, requestVoiceTranscript])
+  }, [isVoice, voiceDataUrl, autoTranscribeVoice, voiceTranscript, voiceTranscriptError, voiceTranscriptLoading, requestVoiceTranscript])
 
   if (isSystem) {
     return (

@@ -58,6 +58,7 @@ function SettingsPage() {
   const [whisperModelName, setWhisperModelName] = useState('base')
   const [whisperModelDir, setWhisperModelDir] = useState('')
   const [whisperDownloadSource, setWhisperDownloadSource] = useState('tsinghua')
+  const [autoTranscribeVoice, setAutoTranscribeVoice] = useState(true)
   const [isWhisperDownloading, setIsWhisperDownloading] = useState(false)
   const [whisperDownloadProgress, setWhisperDownloadProgress] = useState(0)
   const [whisperModelStatus, setWhisperModelStatus] = useState<{ exists: boolean; path?: string } | null>(null)
@@ -125,6 +126,7 @@ function SettingsPage() {
       const savedWhisperModelName = await configService.getWhisperModelName()
       const savedWhisperModelDir = await configService.getWhisperModelDir()
       const savedWhisperSource = await configService.getWhisperDownloadSource()
+      const savedAutoTranscribeVoice = await configService.getAutoTranscribeVoice()
 
       if (savedKey) setDecryptKey(savedKey)
       if (savedPath) setDbPath(savedPath)
@@ -138,6 +140,7 @@ function SettingsPage() {
       if (savedWhisperModelName) setWhisperModelName(savedWhisperModelName)
       if (savedWhisperModelDir) setWhisperModelDir(savedWhisperModelDir)
       if (savedWhisperSource) setWhisperDownloadSource(savedWhisperSource)
+      setAutoTranscribeVoice(savedAutoTranscribeVoice)
     } catch (e) {
       console.error('加载配置失败:', e)
     }
@@ -762,8 +765,25 @@ function SettingsPage() {
       <p className="section-desc">语音解密后自动转写为文字</p>
       <div className="form-group whisper-section">
         <label>语音识别模型 (Whisper)</label>
-        <span className="form-hint">语音解密后自动转文字，模型越大越准确但下载更慢</span>
-        <div className="whisper-grid">
+        <span className="form-hint">点击语音解密后自动转文字，模型越大越准确但下载更慢</span>
+        
+        <label style={{ marginTop: '12px', marginBottom: '8px', display: 'block' }}>自动转文字开关</label>
+        <label className="switch" htmlFor="auto-transcribe-toggle">
+          <input
+            id="auto-transcribe-toggle"
+            className="switch-input"
+            type="checkbox"
+            checked={autoTranscribeVoice}
+            onChange={(e) => {
+              const enabled = e.target.checked
+              setAutoTranscribeVoice(enabled)
+              configService.setAutoTranscribeVoice(enabled)
+            }}
+          />
+          <span className="switch-slider" />
+        </label>
+        
+        <div className="whisper-grid" style={{ marginTop: '16px' }}>
           <div className="whisper-field">
             <span className="field-label">模型</span>
             <select
