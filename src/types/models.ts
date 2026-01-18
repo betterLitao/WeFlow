@@ -33,6 +33,7 @@ export interface Message {
   isSend: number | null
   senderUsername: string | null
   parsedContent: string
+  rawContent?: string
   imageMd5?: string
   imageDatName?: string
   emojiCdnUrl?: string

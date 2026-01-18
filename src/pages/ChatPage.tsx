@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Play, Pause, Image as ImageIcon } from 'lucide-react'
+import { Search, MessageSquare, AlertCircle, Loader2, RefreshCw, X, ChevronDown, Info, Calendar, Database, Hash, Play, Pause, Image as ImageIcon, Link } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useChatStore } from '../stores/chatStore'
 import type { ChatSession, Message } from '../types/models'
@@ -1865,6 +1865,10 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
     )
   }
 
+  // 检测是否为链接卡片消息
+  const isLinkMessage = String(message.localType) === '21474836529' ||
+    (message.rawContent && (message.rawContent.includes('<appmsg') || message.rawContent.includes('&lt;appmsg'))) ||
+    (message.parsedContent && (message.parsedContent.includes('<appmsg') || message.parsedContent.includes('&lt;appmsg')))
   const bubbleClass = isSent ? 'sent' : 'received'
 
   // 头像逻辑：
@@ -1877,6 +1881,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
   const avatarLetter = isSent
     ? '我'
     : getAvatarLetter(isGroupChat ? (senderName || message.senderUsername || '?') : (session.displayName || session.username))
+
 
   // 是否有引用消息
   const hasQuote = message.quotedContent && message.quotedContent.length > 0
@@ -2166,6 +2171,10 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
         />
       )
     }
+
+    // 解析引用消息（Links / App Messages）
+    // localType: 21474836529 corresponds to AppMessage which often contains links
+
     // 带引用的消息
     if (hasQuote) {
       return (
@@ -2177,6 +2186,68 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
           <div className="message-text">{renderTextWithEmoji(cleanMessageContent(message.parsedContent))}</div>
         </div>
       )
+    }
+
+    // 解析引用消息（Links / App Messages）
+    // localType: 21474836529 corresponds to AppMessage which often contains links
+    if (isLinkMessage) {
+      try {
+        // 清理内容：移除可能的 wxid 前缀，找到 XML 起始位置
+        let contentToParse = message.rawContent || message.parsedContent || '';
+        const xmlStartIndex = contentToParse.indexOf('<');
+        if (xmlStartIndex >= 0) {
+          contentToParse = contentToParse.substring(xmlStartIndex);
+        }
+
+        // 处理 HTML 转义字符
+        if (contentToParse.includes('&lt;')) {
+          contentToParse = contentToParse
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .replace(/&quot;/g, '"')
+            .replace(/&apos;/g, "'");
+        }
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(contentToParse, "text/xml");
+        const appMsg = doc.querySelector('appmsg');
+
+        if (appMsg) {
+          const title = doc.querySelector('title')?.textContent || '未命名链接';
+          const des = doc.querySelector('des')?.textContent || '无描述';
+          const url = doc.querySelector('url')?.textContent || '';
+
+          return (
+            <div
+              className="link-message"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (url) {
+                  // 优先使用 electron 接口打开外部浏览器
+                  if (window.electronAPI?.shell?.openExternal) {
+                    window.electronAPI.shell.openExternal(url);
+                  } else {
+                    window.open(url, '_blank');
+                  }
+                }
+              }}
+            >
+              <div className="link-header">
+                <div className="link-content">
+                  <div className="link-title" title={title}>{title}</div>
+                  <div className="link-desc" title={des}>{des}</div>
+                </div>
+                <div className="link-icon">
+                  <Link size={24} />
+                </div>
+              </div>
+            </div>
+          );
+        }
+      } catch (e) {
+        console.error('Failed to parse app message', e);
+      }
     }
     // 普通消息
     return <div className="bubble-content">{renderTextWithEmoji(cleanMessageContent(message.parsedContent))}</div>
