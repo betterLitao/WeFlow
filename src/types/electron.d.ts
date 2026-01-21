@@ -333,6 +333,7 @@ export interface ExportOptions {
   exportEmojis?: boolean
   exportVoiceAsText?: boolean
   excelCompactColumns?: boolean
+  sessionLayout?: 'shared' | 'per-session'
 }
 
 export interface ExportProgress {
