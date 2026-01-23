@@ -10,6 +10,7 @@ import { wcdbService } from './wcdbService'
 import { imageDecryptService } from './imageDecryptService'
 import { chatService } from './chatService'
 import { videoService } from './videoService'
+import { EXPORT_HTML_STYLES } from './exportHtmlStyles'
 
 // ChatLab 格式类型定义
 interface ChatLabHeader {
@@ -608,15 +609,17 @@ class ExportService {
       if (fs.existsSync(filePath)) {
         try {
           const content = fs.readFileSync(filePath, 'utf-8')
-          this.htmlStyleCache = content
-          return content
+          if (content.trim().length > 0) {
+            this.htmlStyleCache = content
+            return content
+          }
         } catch {
           continue
         }
       }
     }
-    this.htmlStyleCache = ''
-    return ''
+    this.htmlStyleCache = EXPORT_HTML_STYLES
+    return this.htmlStyleCache
   }
 
   private normalizeAppMessageContent(content: string): string {
