@@ -305,6 +305,121 @@ class ExportService {
     }
   }
 
+  private formatPlainExportContent(
+    content: string,
+    localType: number,
+    options: { exportVoiceAsText?: boolean },
+    voiceTranscript?: string
+  ): string {
+    const safeContent = content || ''
+
+    if (localType === 3) return '[图片]'
+    if (localType === 1) return this.stripSenderPrefix(safeContent)
+    if (localType === 34) {
+      if (options.exportVoiceAsText) {
+        return voiceTranscript || '[语音消息 - 转文字失败]'
+      }
+      return '[其他消息]'
+    }
+    if (localType === 42) {
+      const normalized = this.normalizeAppMessageContent(safeContent)
+      const nickname =
+        this.extractXmlValue(normalized, 'nickname') ||
+        this.extractXmlValue(normalized, 'displayname') ||
+        this.extractXmlValue(normalized, 'name')
+      return nickname ? `[名片]${nickname}` : '[名片]'
+    }
+    if (localType === 43) {
+      const normalized = this.normalizeAppMessageContent(safeContent)
+      const lengthValue =
+        this.extractXmlValue(normalized, 'playlength') ||
+        this.extractXmlValue(normalized, 'playLength') ||
+        this.extractXmlValue(normalized, 'length') ||
+        this.extractXmlValue(normalized, 'duration')
+      const seconds = lengthValue ? this.parseDurationSeconds(lengthValue) : null
+      return seconds ? `[视频]${seconds}s` : '[视频]'
+    }
+    if (localType === 48) {
+      const normalized = this.normalizeAppMessageContent(safeContent)
+      const location =
+        this.extractXmlValue(normalized, 'label') ||
+        this.extractXmlValue(normalized, 'poiname') ||
+        this.extractXmlValue(normalized, 'poiName') ||
+        this.extractXmlValue(normalized, 'name')
+      return location ? `[定位]${location}` : '[定位]'
+    }
+    if (localType === 50) {
+      return this.parseVoipMessage(safeContent)
+    }
+    if (localType === 10000 || localType === 266287972401) {
+      return this.cleanSystemMessage(safeContent)
+    }
+
+    const normalized = this.normalizeAppMessageContent(safeContent)
+    const isAppMessage = normalized.includes('<appmsg') || normalized.includes('<msg>')
+    if (localType === 49 || isAppMessage) {
+      const typeMatch = /<type>(\d+)<\/type>/i.exec(normalized)
+      const subType = typeMatch ? parseInt(typeMatch[1], 10) : 0
+      const title = this.extractXmlValue(normalized, 'title') || this.extractXmlValue(normalized, 'appname')
+      if (subType === 3 || normalized.includes('<musicurl') || normalized.includes('<songname')) {
+        const songName = this.extractXmlValue(normalized, 'songname') || title || '音乐'
+        return `[音乐]${songName}`
+      }
+      if (subType === 6) {
+        const fileName = this.extractXmlValue(normalized, 'filename') || title || '文件'
+        return `[文件]${fileName}`
+      }
+      if (title.includes('转账') || normalized.includes('transfer')) {
+        const amount = this.extractAmountFromText(
+          [
+            title,
+            this.extractXmlValue(normalized, 'des'),
+            this.extractXmlValue(normalized, 'money'),
+            this.extractXmlValue(normalized, 'amount'),
+            this.extractXmlValue(normalized, 'fee')
+          ]
+            .filter(Boolean)
+            .join(' ')
+        )
+        return amount ? `[转账]${amount}` : '[转账]'
+      }
+      if (title.includes('红包') || normalized.includes('hongbao')) {
+        return `[红包]${title || '微信红包'}`
+      }
+      if (subType === 19 || normalized.includes('<recorditem')) {
+        const forwardName =
+          this.extractXmlValue(normalized, 'nickname') ||
+          this.extractXmlValue(normalized, 'title') ||
+          this.extractXmlValue(normalized, 'des') ||
+          this.extractXmlValue(normalized, 'displayname')
+        return forwardName ? `[转发的聊天记录]${forwardName}` : '[转发的聊天记录]'
+      }
+      if (subType === 33 || subType === 36) {
+        const appName = this.extractXmlValue(normalized, 'appname') || title || '小程序'
+        return `[小程序]${appName}`
+      }
+      if (title) {
+        return `[链接]${title}`
+      }
+      return '[其他消息]'
+    }
+
+    return '[其他消息]'
+  }
+
+  private parseDurationSeconds(value: string): number | null {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric) || numeric <= 0) return null
+    if (numeric >= 1000) return Math.round(numeric / 1000)
+    return Math.round(numeric)
+  }
+
+  private extractAmountFromText(text: string): string | null {
+    if (!text) return null
+    const match = /([¥￥]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?)/.exec(text)
+    return match ? match[1].replace(/\s+/g, '') : null
+  }
+
   private stripSenderPrefix(content: string): string {
     return content.replace(/^[\s]*([a-zA-Z0-9_-]+):(?!\/\/)/, '')
   }
@@ -555,31 +670,15 @@ class ExportService {
   private formatHtmlMessageText(content: string, localType: number): string {
     if (!content) return ''
 
-    const normalized = this.normalizeAppMessageContent(content)
-    const isAppMessage = normalized.includes('<appmsg') || normalized.includes('<msg>')
-
-    if (localType === 49 || isAppMessage) {
-      const typeMatch = /<type>(\d+)<\/type>/i.exec(normalized)
-      const subType = typeMatch ? parseInt(typeMatch[1], 10) : 0
-      const title = this.extractXmlValue(normalized, 'title') || this.extractXmlValue(normalized, 'appname')
-      if (subType === 6) {
-        const fileName = this.extractXmlValue(normalized, 'filename') || title || '文件'
-        return `[文件] ${fileName}`.trim()
-      }
-      if (subType === 33 || subType === 36) {
-        const appName = this.extractXmlValue(normalized, 'appname')
-        const miniTitle = title || appName || '小程序'
-        return `[小程序] ${miniTitle}`.trim()
-      }
-      return title || '[链接]'
+    if (localType === 1) {
+      return this.stripSenderPrefix(content)
     }
 
-    if (localType === 42) {
-      const nickname = this.extractXmlValue(normalized, 'nickname')
-      return nickname ? `[名片] ${nickname}` : '[名片]'
+    if (localType === 34) {
+      return this.parseMessageContent(content, localType) || ''
     }
 
-    return this.parseMessageContent(content, localType) || ''
+    return this.formatPlainExportContent(content, localType, { exportVoiceAsText: false })
   }
 
   /**
@@ -1967,10 +2066,6 @@ class ExportService {
       for (let i = 0; i < sortedMessages.length; i++) {
         const msg = sortedMessages[i]
 
-        // 从缓存获取媒体信息
-        const mediaKey = `${msg.localType}_${msg.localId}`
-        const mediaItem = mediaCache.get(mediaKey) || null
-
         // 确定发送者信息
         let senderRole: string
         let senderWxid: string
@@ -2018,16 +2113,12 @@ class ExportService {
         const row = worksheet.getRow(currentRow)
         row.height = 24
 
-        // 确定内容：优先使用预处理的缓存
-        let contentValue: string
-        if (mediaItem) {
-          contentValue = mediaItem.relativePath
-        } else if (msg.localType === 34 && options.exportVoiceAsText) {
-          // 使用预处理的语音转文字结果
-          contentValue = voiceTranscriptMap.get(msg.localId) || '[语音消息 - 转文字失败]'
-        } else {
-          contentValue = this.parseMessageContent(msg.content, msg.localType) || ''
-        }
+        const contentValue = this.formatPlainExportContent(
+          msg.content,
+          msg.localType,
+          options,
+          voiceTranscriptMap.get(msg.localId)
+        )
 
         // 调试日志
         if (msg.localType === 3 || msg.localType === 47) {
@@ -2190,24 +2281,16 @@ class ExportService {
         phase: 'exporting'
       })
 
-      const columnOrder = this.normalizeTxtColumns(options.txtColumns)
-      const columnLabelMap = new Map(TXT_COLUMN_DEFINITIONS.map((col) => [col.id, col.label]))
       const lines: string[] = []
-      lines.push(columnOrder.map((id) => columnLabelMap.get(id) || id).join('\t'))
 
       for (let i = 0; i < sortedMessages.length; i++) {
         const msg = sortedMessages[i]
-        const mediaKey = `${msg.localType}_${msg.localId}`
-        const mediaItem = mediaCache.get(mediaKey) || null
-
-        let contentValue: string
-        if (mediaItem) {
-          contentValue = mediaItem.relativePath
-        } else if (msg.localType === 34 && options.exportVoiceAsText) {
-          contentValue = voiceTranscriptMap.get(msg.localId) || '[语音消息 - 转文字失败]'
-        } else {
-          contentValue = this.parseMessageContent(msg.content, msg.localType) || ''
-        }
+        const contentValue = this.formatPlainExportContent(
+          msg.content,
+          msg.localType,
+          options,
+          voiceTranscriptMap.get(msg.localId)
+        )
 
         let senderRole: string
         let senderWxid: string
@@ -2242,21 +2325,9 @@ class ExportService {
           }
         }
 
-        const values: Record<string, string> = {
-          index: String(i + 1),
-          time: this.formatTimestamp(msg.createTime),
-          senderRole,
-          senderNickname,
-          senderWxid,
-          senderRemark,
-          messageType: this.getMessageTypeName(msg.localType),
-          content: contentValue
-        }
-
-        const line = columnOrder
-          .map((id) => this.sanitizeTxtValue(values[id] ?? ''))
-          .join('\t')
-        lines.push(line)
+        lines.push(`${this.formatTimestamp(msg.createTime)} '${senderRole}'`)
+        lines.push(contentValue)
+        lines.push('')
 
         if ((i + 1) % 200 === 0) {
           const progress = 60 + Math.floor((i + 1) / sortedMessages.length * 30)
@@ -2417,7 +2488,7 @@ class ExportService {
         if (msg.localType === 34 && useVoiceTranscript) {
           textContent = voiceTranscriptMap.get(msg.localId) || '[语音消息 - 转文字失败]'
         }
-        if (mediaItem && (msg.localType === 3 || msg.localType === 43 || msg.localType === 47)) {
+        if (mediaItem && (msg.localType === 3 || msg.localType === 47)) {
           textContent = ''
         }
 

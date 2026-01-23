@@ -61,7 +61,6 @@ function SettingsPage() {
   const [exportDefaultMedia, setExportDefaultMedia] = useState(false)
   const [exportDefaultVoiceAsText, setExportDefaultVoiceAsText] = useState(true)
   const [exportDefaultExcelCompactColumns, setExportDefaultExcelCompactColumns] = useState(true)
-  const [exportDefaultTxtColumns, setExportDefaultTxtColumns] = useState<string[]>(['index', 'time', 'senderRole', 'messageType', 'content'])
 
   const [isLoading, setIsLoadingState] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
@@ -142,8 +141,6 @@ function SettingsPage() {
       const savedExportDefaultMedia = await configService.getExportDefaultMedia()
       const savedExportDefaultVoiceAsText = await configService.getExportDefaultVoiceAsText()
       const savedExportDefaultExcelCompactColumns = await configService.getExportDefaultExcelCompactColumns()
-      const savedExportDefaultTxtColumns = await configService.getExportDefaultTxtColumns()
-      const defaultTxtColumns = ['index', 'time', 'senderRole', 'messageType', 'content']
 
       if (savedKey) setDecryptKey(savedKey)
       if (savedPath) setDbPath(savedPath)
@@ -161,11 +158,6 @@ function SettingsPage() {
       setExportDefaultMedia(savedExportDefaultMedia ?? false)
       setExportDefaultVoiceAsText(savedExportDefaultVoiceAsText ?? true)
       setExportDefaultExcelCompactColumns(savedExportDefaultExcelCompactColumns ?? true)
-      setExportDefaultTxtColumns(
-        savedExportDefaultTxtColumns && savedExportDefaultTxtColumns.length > 0
-          ? savedExportDefaultTxtColumns
-          : defaultTxtColumns
-      )
 
       // 如果语言列表为空，保存默认值
       if (!savedTranscribeLanguages || savedTranscribeLanguages.length === 0) {
@@ -174,9 +166,6 @@ function SettingsPage() {
         await configService.setTranscribeLanguages(defaultLanguages)
       }
 
-      if (!savedExportDefaultTxtColumns || savedExportDefaultTxtColumns.length === 0) {
-        await configService.setExportDefaultTxtColumns(defaultTxtColumns)
-      }
 
       if (savedWhisperModelDir) setWhisperModelDir(savedWhisperModelDir)
     } catch (e) {
@@ -911,16 +900,6 @@ function SettingsPage() {
     { value: 'compact', label: '精简列', desc: '序号、时间、发送者身份、消息类型、内容' },
     { value: 'full', label: '完整列', desc: '含发送者昵称/微信ID/备注' }
   ]
-  const exportTxtColumnOptions = [
-    { value: 'index', label: '序号' },
-    { value: 'time', label: '时间' },
-    { value: 'senderRole', label: '发送者身份' },
-    { value: 'messageType', label: '消息类型' },
-    { value: 'content', label: '内容' },
-    { value: 'senderNickname', label: '发送者昵称' },
-    { value: 'senderWxid', label: '发送者微信ID' },
-    { value: 'senderRemark', label: '发送者备注' }
-  ]
 
   const getOptionLabel = (options: { value: string; label: string }[], value: string) => {
     return options.find((option) => option.value === value)?.label ?? value
@@ -1097,40 +1076,6 @@ function SettingsPage() {
         </div>
       </div>
 
-      <div className="form-group">
-        <label>TXT 导出栏目</label>
-        <span className="form-hint">默认与 Excel 精简列一致，可多选调整输出字段</span>
-        <div className="language-checkboxes">
-          {exportTxtColumnOptions.map((column) => {
-            const checked = exportDefaultTxtColumns.includes(column.value)
-            return (
-              <label key={column.value} className="language-checkbox">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={async (e) => {
-                    const enabled = e.target.checked
-                    const nextColumns = enabled
-                      ? [...exportDefaultTxtColumns, column.value]
-                      : exportDefaultTxtColumns.filter((value) => value !== column.value)
-                    if (nextColumns.length === 0) {
-                      showMessage('至少选择一个 TXT 导出栏目', false)
-                      return
-                    }
-                    setExportDefaultTxtColumns(nextColumns)
-                    await configService.setExportDefaultTxtColumns(nextColumns)
-                    showMessage('已更新 TXT 导出栏目', true)
-                  }}
-                />
-                <div className="checkbox-custom">
-                  <Check size={14} />
-                  <span>{column.label}</span>
-                </div>
-              </label>
-            )
-          })}
-        </div>
-      </div>
     </div>
     )
   }
