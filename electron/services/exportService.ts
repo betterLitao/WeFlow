@@ -2364,12 +2364,15 @@ class ExportService {
         const row = worksheet.getRow(currentRow)
         row.height = 24
 
-        const contentValue = this.formatPlainExportContent(
-          msg.content,
-          msg.localType,
-          options,
-          voiceTranscriptMap.get(msg.localId)
-        )
+        const mediaKey = `${msg.localType}_${msg.localId}`
+        const mediaItem = mediaCache.get(mediaKey)
+        const contentValue = mediaItem?.relativePath
+          || this.formatPlainExportContent(
+            msg.content,
+            msg.localType,
+            options,
+            voiceTranscriptMap.get(msg.localId)
+          )
 
         // 调试日志
         if (msg.localType === 3 || msg.localType === 47) {
