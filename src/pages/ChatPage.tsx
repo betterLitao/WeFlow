@@ -491,7 +491,11 @@ function ChatPage(_props: ChatPageProps) {
       await new Promise(resolve => setTimeout(resolve, 0))
 
       const dllStart = performance.now()
-      const result = await window.electronAPI.chat.enrichSessionsContactInfo(usernames)
+      const result = await window.electronAPI.chat.enrichSessionsContactInfo(usernames) as {
+        success: boolean
+        contacts?: Record<string, { displayName?: string; avatarUrl?: string }>
+        error?: string
+      }
       const dllTime = performance.now() - dllStart
 
       // DLL 调用后再次让出控制权
@@ -504,7 +508,8 @@ function ChatPage(_props: ChatPageProps) {
 
       if (result.success && result.contacts) {
         // 将更新加入队列，用于侧边栏更新
-        for (const [username, contact] of Object.entries(result.contacts)) {
+        const contacts = result.contacts || {}
+        for (const [username, contact] of Object.entries(contacts)) {
           contactUpdateQueueRef.current.set(username, contact)
 
           // 如果是自己的信息且当前个人头像为空，同步更新
@@ -545,7 +550,11 @@ function ChatPage(_props: ChatPageProps) {
     setIsRefreshingMessages(true)
     try {
       // 获取最新消息并增量添加
-      const result = await window.electronAPI.chat.getLatestMessages(currentSessionId, 50)
+      const result = await window.electronAPI.chat.getLatestMessages(currentSessionId, 50) as {
+        success: boolean;
+        messages?: Message[];
+        error?: string
+      }
       if (!result.success || !result.messages) {
         return
       }
@@ -593,7 +602,12 @@ function ChatPage(_props: ChatPageProps) {
     const firstMsgEl = listEl?.querySelector('.message-wrapper') as HTMLElement | null
 
     try {
-      const result = await window.electronAPI.chat.getMessages(sessionId, offset, messageLimit, startTime, endTime)
+      const result = await window.electronAPI.chat.getMessages(sessionId, offset, messageLimit, startTime, endTime) as {
+        success: boolean;
+        messages?: Message[];
+        hasMore?: boolean;
+        error?: string
+      }
       if (result.success && result.messages) {
         if (offset === 0) {
           setMessages(result.messages)
@@ -690,7 +704,12 @@ function ChatPage(_props: ChatPageProps) {
     try {
       const lastMsg = messages[messages.length - 1]
       // 从最后一条消息的时间开始往后找
-      const result = await window.electronAPI.chat.getMessages(currentSessionId, 0, 50, lastMsg.createTime, 0, true)
+      const result = await window.electronAPI.chat.getMessages(currentSessionId, 0, 50, lastMsg.createTime, 0, true) as {
+        success: boolean;
+        messages?: Message[];
+        hasMore?: boolean;
+        error?: string
+      }
 
       if (result.success && result.messages) {
         // 过滤掉已经在列表中的重复消息
@@ -1501,6 +1520,10 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
   const imageClickTimerRef = useRef<number | null>(null)
   const imageContainerRef = useRef<HTMLDivElement>(null)
   const imageAutoDecryptTriggered = useRef(false)
+  const imageAutoHdTriggered = useRef<string | null>(null)
+  const [imageInView, setImageInView] = useState(false)
+  const imageForceHdAttempted = useRef<string | null>(null)
+  const imageForceHdPending = useRef(false)
   const [voiceError, setVoiceError] = useState(false)
   const [voiceLoading, setVoiceLoading] = useState(false)
   const [isVoicePlaying, setIsVoicePlaying] = useState(false)
@@ -1551,7 +1574,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
     const contentToUse = message.content || (message as any).rawContent || message.parsedContent
     if (contentToUse) {
       console.log('[Video Debug] Parsing MD5 from content, length:', contentToUse.length)
-      window.electronAPI.video.parseVideoMd5(contentToUse).then((result) => {
+      window.electronAPI.video.parseVideoMd5(contentToUse).then((result: { success: boolean; md5?: string; error?: string }) => {
         console.log('[Video Debug] Parse result:', result)
         if (result && result.success && result.md5) {
           console.log('[Video Debug] Parsed MD5:', result.md5)
@@ -1559,7 +1582,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
         } else {
           console.error('[Video Debug] Failed to parse MD5:', result)
         }
-      }).catch((err) => {
+      }).catch((err: unknown) => {
         console.error('[Video Debug] Parse error:', err)
       })
     }
@@ -1667,7 +1690,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
       }
       const pending = senderAvatarLoading.get(sender)
       if (pending) {
-        pending.then((result) => {
+        pending.then((result: { avatarUrl?: string; displayName?: string } | null) => {
           if (result) {
             setSenderAvatarUrl(result.avatarUrl)
             setSenderName(result.displayName)
@@ -1697,10 +1720,13 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
     }
   }, [isEmoji, message.emojiCdnUrl, emojiLocalPath, emojiLoading, emojiError])
 
-  const requestImageDecrypt = useCallback(async (forceUpdate = false) => {
-    if (!isImage || imageLoading) return
-    setImageLoading(true)
-    setImageError(false)
+  const requestImageDecrypt = useCallback(async (forceUpdate = false, silent = false) => {
+    if (!isImage) return
+    if (imageLoading) return
+    if (!silent) {
+      setImageLoading(true)
+      setImageError(false)
+    }
     try {
       if (message.imageMd5 || message.imageDatName) {
         const result = await window.electronAPI.image.decrypt({
@@ -1726,13 +1752,24 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
         setImageHasUpdate(false)
         return
       }
-      setImageError(true)
+      if (!silent) setImageError(true)
     } catch {
-      setImageError(true)
+      if (!silent) setImageError(true)
     } finally {
-      setImageLoading(false)
+      if (!silent) setImageLoading(false)
     }
   }, [isImage, imageLoading, message.imageMd5, message.imageDatName, message.localId, session.username, imageCacheKey, detectImageMimeFromBase64])
+
+  const triggerForceHd = useCallback(() => {
+    if (!message.imageMd5 && !message.imageDatName) return
+    if (imageForceHdAttempted.current === imageCacheKey) return
+    if (imageForceHdPending.current) return
+    imageForceHdAttempted.current = imageCacheKey
+    imageForceHdPending.current = true
+    requestImageDecrypt(true, true).finally(() => {
+      imageForceHdPending.current = false
+    })
+  }, [imageCacheKey, message.imageDatName, message.imageMd5, requestImageDecrypt])
 
   const handleImageClick = useCallback(() => {
     if (imageClickTimerRef.current) {
@@ -1769,7 +1806,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
       sessionId: session.username,
       imageMd5: message.imageMd5 || undefined,
       imageDatName: message.imageDatName
-    }).then((result) => {
+    }).then((result: { success: boolean; localPath?: string; hasUpdate?: boolean; error?: string }) => {
       if (cancelled) return
       if (result.success && result.localPath) {
         imageDataUrlCache.set(imageCacheKey, result.localPath)
@@ -1787,7 +1824,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
 
   useEffect(() => {
     if (!isImage) return
-    const unsubscribe = window.electronAPI.image.onUpdateAvailable((payload) => {
+    const unsubscribe = window.electronAPI.image.onUpdateAvailable((payload: { cacheKey: string; imageMd5?: string; imageDatName?: string }) => {
       const matchesCacheKey =
         payload.cacheKey === message.imageMd5 ||
         payload.cacheKey === message.imageDatName ||
@@ -1804,7 +1841,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
 
   useEffect(() => {
     if (!isImage) return
-    const unsubscribe = window.electronAPI.image.onCacheResolved((payload) => {
+    const unsubscribe = window.electronAPI.image.onCacheResolved((payload: { cacheKey: string; imageMd5?: string; imageDatName?: string; localPath: string }) => {
       const matchesCacheKey =
         payload.cacheKey === message.imageMd5 ||
         payload.cacheKey === message.imageDatName ||
@@ -1845,6 +1882,47 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
     observer.observe(container)
     return () => observer.disconnect()
   }, [isImage, imageLocalPath, message.imageMd5, message.imageDatName, requestImageDecrypt])
+
+  // 进入视野时自动尝试切换高清图
+  useEffect(() => {
+    if (!isImage) return
+    const container = imageContainerRef.current
+    if (!container) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        setImageInView(entry.isIntersecting)
+      },
+      { rootMargin: '120px', threshold: 0 }
+    )
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [isImage])
+
+  useEffect(() => {
+    if (!isImage || !imageHasUpdate || !imageInView) return
+    if (imageAutoHdTriggered.current === imageCacheKey) return
+    imageAutoHdTriggered.current = imageCacheKey
+    triggerForceHd()
+  }, [isImage, imageHasUpdate, imageInView, imageCacheKey, triggerForceHd])
+
+  useEffect(() => {
+    if (!isImage || !showImagePreview || !imageHasUpdate) return
+    if (imageAutoHdTriggered.current === imageCacheKey) return
+    imageAutoHdTriggered.current = imageCacheKey
+    triggerForceHd()
+  }, [isImage, showImagePreview, imageHasUpdate, imageCacheKey, triggerForceHd])
+
+  // 更激进：进入视野/打开预览时，无论 hasUpdate 与否都尝试强制高清
+  useEffect(() => {
+    if (!isImage || !imageInView) return
+    triggerForceHd()
+  }, [isImage, imageInView, triggerForceHd])
+
+  useEffect(() => {
+    if (!isImage || !showImagePreview) return
+    triggerForceHd()
+  }, [isImage, showImagePreview, triggerForceHd])
 
 
   useEffect(() => {
@@ -1933,7 +2011,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
   useEffect(() => {
     if (!isVoice || voiceDataUrl) return
     window.electronAPI.chat.resolveVoiceCache(session.username, String(message.localId))
-      .then(result => {
+      .then((result: { success: boolean; hasCache: boolean; data?: string; error?: string }) => {
         if (result.success && result.hasCache && result.data) {
           const url = `data:audio/wav;base64,${result.data}`
           voiceDataUrlCache.set(voiceCacheKey, url)
@@ -2066,7 +2144,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
 
     console.log('[Video Debug] Loading video info for MD5:', videoMd5)
     setVideoLoading(true)
-    window.electronAPI.video.getVideoInfo(videoMd5).then((result) => {
+    window.electronAPI.video.getVideoInfo(videoMd5).then((result: { success: boolean; exists: boolean; videoUrl?: string; coverUrl?: string; thumbUrl?: string; error?: string }) => {
       console.log('[Video Debug] getVideoInfo result:', result)
       if (result && result.success) {
         setVideoInfo({
@@ -2079,7 +2157,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
         console.error('[Video Debug] Video info failed:', result)
         setVideoInfo({ exists: false })
       }
-    }).catch((err) => {
+    }).catch((err: unknown) => {
       console.error('[Video Debug] getVideoInfo error:', err)
       setVideoInfo({ exists: false })
     }).finally(() => {
@@ -2092,7 +2170,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
   const [autoTranscribeEnabled, setAutoTranscribeEnabled] = useState(false)
 
   useEffect(() => {
-    window.electronAPI.config.get('autoTranscribeVoice').then((value) => {
+    window.electronAPI.config.get('autoTranscribeVoice').then((value: unknown) => {
       setAutoTranscribeEnabled(value === true)
     })
   }, [])
@@ -2196,23 +2274,15 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
                   src={imageLocalPath}
                   alt="图片"
                   className="image-message"
-                  onClick={() => setShowImagePreview(true)}
+                  onClick={() => {
+                    if (imageHasUpdate) {
+                      void requestImageDecrypt(true, true)
+                    }
+                    setShowImagePreview(true)
+                  }}
                   onLoad={() => setImageError(false)}
                   onError={() => setImageError(true)}
                 />
-                {imageHasUpdate && (
-                  <button
-                    className="image-update-button"
-                    type="button"
-                    title="发现更高清图片，点击更新"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      void requestImageDecrypt(true)
-                    }}
-                  >
-                    <RefreshCw size={14} />
-                  </button>
-                )}
               </div>
               {showImagePreview && (
                 <ImagePreview src={imageLocalPath} onClose={() => setShowImagePreview(false)} />
