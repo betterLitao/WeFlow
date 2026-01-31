@@ -845,6 +845,18 @@ function registerIpcHandlers() {
     return analyticsService.getTimeDistribution()
   })
 
+  ipcMain.handle('analytics:getExcludedUsernames', async () => {
+    return analyticsService.getExcludedUsernames()
+  })
+
+  ipcMain.handle('analytics:setExcludedUsernames', async (_, usernames: string[]) => {
+    return analyticsService.setExcludedUsernames(usernames)
+  })
+
+  ipcMain.handle('analytics:getExcludeCandidates', async () => {
+    return analyticsService.getExcludeCandidates()
+  })
+
   // 缓存管理
   ipcMain.handle('cache:clearAnalytics', async () => {
     return analyticsService.clearCache()

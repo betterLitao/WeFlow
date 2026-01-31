@@ -175,6 +175,25 @@ export interface ElectronAPI {
       }
       error?: string
     }>
+    getExcludedUsernames: () => Promise<{
+      success: boolean
+      data?: string[]
+      error?: string
+    }>
+    setExcludedUsernames: (usernames: string[]) => Promise<{
+      success: boolean
+      data?: string[]
+      error?: string
+    }>
+    getExcludeCandidates: () => Promise<{
+      success: boolean
+      data?: Array<{
+        username: string
+        displayName: string
+        avatarUrl?: string
+      }>
+      error?: string
+    }>
     onProgress: (callback: (payload: { status: string; progress: number }) => void) => () => void
   }
   cache: {
