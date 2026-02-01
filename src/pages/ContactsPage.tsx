@@ -41,15 +41,10 @@ function ContactsPage() {
                 return
             }
             const contactsResult = await window.electronAPI.chat.getContacts()
-            console.log('📞 getContacts结果:', contactsResult)
+            
             if (contactsResult.success && contactsResult.contacts) {
-                console.log('📊 总联系人数:', contactsResult.contacts.length)
-                console.log('📊 按类型统计:', {
-                    friends: contactsResult.contacts.filter((c: ContactInfo) => c.type === 'friend').length,
-                    groups: contactsResult.contacts.filter((c: ContactInfo) => c.type === 'group').length,
-                    officials: contactsResult.contacts.filter((c: ContactInfo) => c.type === 'official').length,
-                    other: contactsResult.contacts.filter((c: ContactInfo) => c.type === 'other').length
-                })
+                
+                
 
                 // 获取头像URL
                 const usernames = contactsResult.contacts.map((c: ContactInfo) => c.username)

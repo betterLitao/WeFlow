@@ -107,7 +107,11 @@ class AnalyticsService {
       if (match) return match[1]
       return trimmed
     }
-    return trimmed
+
+    const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
+    const cleaned = suffixMatch ? suffixMatch[1] : trimmed
+    
+    return cleaned
   }
 
   private isPrivateSession(username: string, cleanedWxid: string): boolean {
@@ -245,6 +249,9 @@ class AnalyticsService {
   }
 
   private async computeAggregateByCursor(sessionIds: string[], beginTimestamp = 0, endTimestamp = 0): Promise<any> {
+    const wxid = this.configService.get('myWxid')
+    const cleanedWxid = wxid ? this.cleanAccountDirName(wxid) : ''
+
     const aggregate = {
       total: 0,
       sent: 0,
@@ -269,8 +276,22 @@ class AnalyticsService {
         if (endTimestamp > 0 && createTime > endTimestamp) return
 
         const localType = parseInt(row.local_type || row.type || '1', 10)
-        const isSendRaw = row.computed_is_send ?? row.is_send ?? row.isSend ?? 0
-        const isSend = String(isSendRaw) === '1' || isSendRaw === 1 || isSendRaw === true
+        const isSendRaw = row.computed_is_send ?? row.is_send ?? row.isSend
+        let isSend = String(isSendRaw) === '1' || isSendRaw === 1 || isSendRaw === true
+
+        // 如果底层没有提供 is_send，则根据发送者用户名推断
+        const senderUsername = row.sender_username || row.senderUsername || row.sender
+        if (isSendRaw === undefined || isSendRaw === null) {
+          if (senderUsername && (cleanedWxid)) {
+            const senderLower = String(senderUsername).toLowerCase()
+            const myWxidLower = cleanedWxid.toLowerCase()
+            isSend = (
+              senderLower === myWxidLower ||
+              // 兼容非 wxid 开头的账号（如果文件夹名带后缀，如 custom_backup，而 sender 是 custom）
+              (myWxidLower.startsWith(senderLower + '_'))
+            )
+          }
+        }
 
         aggregate.total += 1
         sessionStat.total += 1

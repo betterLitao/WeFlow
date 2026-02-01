@@ -74,8 +74,9 @@ class DualReportService {
       return trimmed
     }
     const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
-    if (suffixMatch) return suffixMatch[1]
-    return trimmed
+    const cleaned = suffixMatch ? suffixMatch[1] : trimmed
+    
+    return cleaned
   }
 
   private async ensureConnectedWithConfig(
@@ -202,7 +203,12 @@ class DualReportService {
     if (!sender) return false
     const rawLower = rawWxid ? rawWxid.toLowerCase() : ''
     const cleanedLower = cleanedWxid ? cleanedWxid.toLowerCase() : ''
-    return sender === rawLower || sender === cleanedLower
+    return !!(
+      sender === rawLower ||
+      sender === cleanedLower ||
+      (rawLower && rawLower.startsWith(sender + '_')) ||
+      (cleanedLower && cleanedLower.startsWith(sender + '_'))
+    )
   }
 
   private async getFirstMessages(

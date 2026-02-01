@@ -1,5 +1,5 @@
 import { join, dirname, basename, extname } from 'path'
-import { existsSync, mkdirSync, readdirSync, statSync, readFileSync, writeFileSync, copyFileSync, unlinkSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, statSync, readFileSync, writeFileSync, copyFileSync, unlinkSync, watch } from 'fs'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as https from 'https'
@@ -7,7 +7,7 @@ import * as http from 'http'
 import * as fzstd from 'fzstd'
 import * as crypto from 'crypto'
 import Database from 'better-sqlite3'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { ConfigService } from './config'
 import { wcdbService } from './wcdbService'
 import { MessageCacheService } from './messageCacheService'
@@ -152,9 +152,9 @@ class ChatService {
     }
 
     const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
-    if (suffixMatch) return suffixMatch[1]
+    const cleaned = suffixMatch ? suffixMatch[1] : trimmed
 
-    return trimmed
+    return cleaned
   }
 
   /**
@@ -186,6 +186,9 @@ class ChatService {
 
       this.connected = true
 
+      // 设置数据库监控
+      this.setupDbMonitor()
+
       // 预热 listMediaDbs 缓存（后台异步执行，不阻塞连接）
       this.warmupMediaDbsCache()
 
@@ -194,6 +197,24 @@ class ChatService {
       console.error('ChatService: 连接数据库失败:', e)
       return { success: false, error: String(e) }
     }
+  }
+
+  private monitorSetup = false
+
+  private setupDbMonitor() {
+    if (this.monitorSetup) return
+    this.monitorSetup = true
+
+    // 使用 C++ DLL 内部的文件监控 (ReadDirectoryChangesW)
+    // 这种方式更高效，且不占用 JS 线程，并能直接监听 session/message 目录变更
+    wcdbService.setMonitor((type, json) => {
+      // 广播给所有渲染进程窗口
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('wcdb-change', { type, json })
+        }
+      })
+    })
   }
 
   /**
@@ -543,7 +564,7 @@ class ChatService {
         FROM contact
       `
 
-      console.log('查询contact.db...')
+
       const contactResult = await wcdbService.execQuery('contact', null, contactQuery)
 
       if (!contactResult.success || !contactResult.rows) {
@@ -551,13 +572,13 @@ class ChatService {
         return { success: false, error: contactResult.error || '查询联系人失败' }
       }
 
-      console.log('查询到', contactResult.rows.length, '条联系人记录')
+
       const rows = contactResult.rows as Record<string, any>[]
 
       // 调试：显示前5条数据样本
-      console.log('📋 前5条数据样本:')
+
       rows.slice(0, 5).forEach((row, idx) => {
-        console.log(`  ${idx + 1}. username: ${row.username}, local_type: ${row.local_type}, remark: ${row.remark || '无'}, nick_name: ${row.nick_name || '无'}`)
+
       })
 
       // 调试：统计local_type分布
@@ -566,7 +587,7 @@ class ChatService {
         const lt = row.local_type || 0
         localTypeStats.set(lt, (localTypeStats.get(lt) || 0) + 1)
       })
-      console.log('📊 local_type分布:', Object.fromEntries(localTypeStats))
+
 
       // 获取会话表的最后联系时间用于排序
       const lastContactTimeMap = new Map<string, number>()
@@ -642,13 +663,8 @@ class ChatService {
         })
       }
 
-      console.log('过滤后得到', contacts.length, '个有效联系人')
-      console.log('📊 按类型统计:', {
-        friends: contacts.filter(c => c.type === 'friend').length,
-        groups: contacts.filter(c => c.type === 'group').length,
-        officials: contacts.filter(c => c.type === 'official').length,
-        other: contacts.filter(c => c.type === 'other').length
-      })
+
+
 
       // 按最近联系时间排序
       contacts.sort((a, b) => {
@@ -665,7 +681,7 @@ class ChatService {
       // 移除临时的lastContactTime字段
       const result = contacts.map(({ lastContactTime, ...rest }) => rest)
 
-      console.log('返回', result.length, '个联系人')
+
       return { success: true, contacts: result }
     } catch (e) {
       console.error('ChatService: 获取通讯录失败:', e)
@@ -731,7 +747,7 @@ class ChatService {
 
         // 如果需要跳过消息(offset > 0),逐批获取但不返回
         if (offset > 0) {
-          console.log(`[ChatService] 跳过消息: offset=${offset}`)
+
           let skipped = 0
           while (skipped < offset) {
             const skipBatch = await wcdbService.fetchMessageBatch(state.cursor)
@@ -740,17 +756,17 @@ class ChatService {
               return { success: false, error: skipBatch.error || '跳过消息失败' }
             }
             if (!skipBatch.rows || skipBatch.rows.length === 0) {
-              console.log('[ChatService] 跳过时没有更多消息')
+
               return { success: true, messages: [], hasMore: false }
             }
             skipped += skipBatch.rows.length
             state.fetched += skipBatch.rows.length
             if (!skipBatch.hasMore) {
-              console.log('[ChatService] 跳过时已到达末尾')
+
               return { success: true, messages: [], hasMore: false }
             }
           }
-          console.log(`[ChatService] 跳过完成: skipped=${skipped}, fetched=${state.fetched}`)
+
         }
       } else if (state && offset !== state.fetched) {
         // offset 与 fetched 不匹配,说明状态不一致
@@ -913,6 +929,40 @@ class ChatService {
     }
   }
 
+  async getNewMessages(sessionId: string, minTime: number, limit: number = this.messageBatchDefault): Promise<{ success: boolean; messages?: Message[]; error?: string }> {
+    try {
+      const connectResult = await this.ensureConnected()
+      if (!connectResult.success) {
+        return { success: false, error: connectResult.error || '数据库未连接' }
+      }
+
+      const res = await wcdbService.getNewMessages(sessionId, minTime, limit)
+      if (!res.success || !res.messages) {
+        return { success: false, error: res.error || '获取新消息失败' }
+      }
+
+      // 转换为 Message 对象
+      const messages = this.mapRowsToMessages(res.messages as Record<string, any>[])
+      const normalized = this.normalizeMessageOrder(messages)
+
+      // 并发检查并修复缺失 CDN URL 的表情包
+      const fixPromises: Promise<void>[] = []
+      for (const msg of normalized) {
+        if (msg.localType === 47 && !msg.emojiCdnUrl && msg.emojiMd5) {
+          fixPromises.push(this.fallbackEmoticon(msg))
+        }
+      }
+      if (fixPromises.length > 0) {
+        await Promise.allSettled(fixPromises)
+      }
+
+      return { success: true, messages: normalized }
+    } catch (e) {
+      console.error('ChatService: 获取增量消息失败:', e)
+      return { success: false, error: String(e) }
+    }
+  }
+
   private normalizeMessageOrder(messages: Message[]): Message[] {
     if (messages.length < 2) return messages
     const first = messages[0]
@@ -1019,13 +1069,19 @@ class ChatService {
 
       if (senderUsername && (myWxidLower || cleanedWxidLower)) {
         const senderLower = String(senderUsername).toLowerCase()
-        const expectedIsSend = (senderLower === myWxidLower || senderLower === cleanedWxidLower) ? 1 : 0
+        const expectedIsSend = (
+          senderLower === myWxidLower ||
+          senderLower === cleanedWxidLower ||
+          // 兼容非 wxid 开头的账号（如果文件夹名带后缀，如 custom_backup，而 sender 是 custom）
+          (myWxidLower && myWxidLower.startsWith(senderLower + '_')) ||
+          (cleanedWxidLower && cleanedWxidLower.startsWith(senderLower + '_'))
+        ) ? 1 : 0
         if (isSend === null) {
           isSend = expectedIsSend
           // [DEBUG] Issue #34: 记录 isSend 推断过程
           if (expectedIsSend === 0 && localType === 1) {
             // 仅在被判为接收且是文本消息时记录，避免刷屏
-            // console.log(`[ChatService] inferred isSend=0: sender=${senderUsername}, myWxid=${myWxid} (cleaned=${cleanedWxid})`)
+            // 
           }
         }
       } else if (senderUsername && !myWxid) {
@@ -1249,7 +1305,7 @@ class ChatService {
           return title
       }
     }
-    
+
     // 如果没有 title，根据 type 返回默认标签
     switch (type) {
       case '6':
@@ -1607,10 +1663,10 @@ class ChatService {
           // 文件消息
           result.fileName = title || this.extractXmlValue(content, 'filename')
           result.linkTitle = result.fileName
-          
+
           // 提取文件大小
-          const fileSizeStr = this.extractXmlValue(content, 'totallen') || 
-                             this.extractXmlValue(content, 'filesize')
+          const fileSizeStr = this.extractXmlValue(content, 'totallen') ||
+            this.extractXmlValue(content, 'filesize')
           if (fileSizeStr) {
             const size = parseInt(fileSizeStr, 10)
             if (!isNaN(size)) {
@@ -1635,7 +1691,7 @@ class ChatService {
         case '19': {
           // 聊天记录
           result.chatRecordTitle = title || '聊天记录'
-          
+
           // 解析聊天记录列表
           const recordList: Array<{
             datatype: number
@@ -1648,10 +1704,10 @@ class ChatService {
           // 查找所有 <recorditem> 标签
           const recordItemRegex = /<recorditem>([\s\S]*?)<\/recorditem>/gi
           let match: RegExpExecArray | null
-          
+
           while ((match = recordItemRegex.exec(content)) !== null) {
             const itemXml = match[1]
-            
+
             const datatypeStr = this.extractXmlValue(itemXml, 'datatype')
             const sourcename = this.extractXmlValue(itemXml, 'sourcename')
             const sourcetime = this.extractXmlValue(itemXml, 'sourcetime')
@@ -1680,10 +1736,10 @@ class ChatService {
           // 小程序
           result.linkTitle = title
           result.linkUrl = url
-          
+
           // 提取缩略图
           const thumbUrl = this.extractXmlValue(content, 'thumburl') ||
-                          this.extractXmlValue(content, 'cdnthumburl')
+            this.extractXmlValue(content, 'cdnthumburl')
           if (thumbUrl) {
             result.linkThumb = thumbUrl
           }
@@ -1693,11 +1749,11 @@ class ChatService {
         case '2000': {
           // 转账
           result.linkTitle = title || '[转账]'
-          
+
           // 可以提取转账金额等信息
           const payMemo = this.extractXmlValue(content, 'pay_memo')
           const feedesc = this.extractXmlValue(content, 'feedesc')
-          
+
           if (payMemo) {
             result.linkTitle = payMemo
           } else if (feedesc) {
@@ -1710,9 +1766,9 @@ class ChatService {
           // 其他类型，提取通用字段
           result.linkTitle = title
           result.linkUrl = url
-          
+
           const thumbUrl = this.extractXmlValue(content, 'thumburl') ||
-                          this.extractXmlValue(content, 'cdnthumburl')
+            this.extractXmlValue(content, 'cdnthumburl')
           if (thumbUrl) {
             result.linkThumb = thumbUrl
           }
@@ -2132,7 +2188,7 @@ class ChatService {
   private decodeMaybeCompressed(raw: any, fieldName: string = 'unknown'): string {
     if (!raw) return ''
 
-    // console.log(`[ChatService] Decoding ${fieldName}: type=${typeof raw}`, raw)
+    // 
 
     // 如果是 Buffer/Uint8Array
     if (Buffer.isBuffer(raw) || raw instanceof Uint8Array) {
@@ -2148,7 +2204,7 @@ class ChatService {
         const bytes = Buffer.from(raw, 'hex')
         if (bytes.length > 0) {
           const result = this.decodeBinaryContent(bytes, raw)
-          // console.log(`[ChatService] HEX decoded result: ${result}`)
+          // 
           return result
         }
       }
@@ -2200,7 +2256,7 @@ class ChatService {
 
       // 如果提供了 fallbackValue，且解码结果看起来像二进制垃圾，则返回 fallbackValue
       if (fallbackValue && replacementCount > 0) {
-        // console.log(`[ChatService] Binary garbage detected, using fallback: ${fallbackValue}`)
+        // 
         return fallbackValue
       }
 
@@ -2794,7 +2850,7 @@ class ChatService {
         const t1 = Date.now()
         const msgResult = await this.getMessageByLocalId(sessionId, localId)
         const t2 = Date.now()
-        console.log(`[Voice] getMessageByLocalId: ${t2 - t1}ms`)
+
 
         if (msgResult.success && msgResult.message) {
           const msg = msgResult.message as any
@@ -2813,7 +2869,7 @@ class ChatService {
       // 检查 WAV 内存缓存
       const wavCache = this.voiceWavCache.get(cacheKey)
       if (wavCache) {
-        console.log(`[Voice] 内存缓存命中，总耗时: ${Date.now() - startTime}ms`)
+
         return { success: true, data: wavCache.toString('base64') }
       }
 
@@ -2825,7 +2881,7 @@ class ChatService {
           const wavData = readFileSync(wavFilePath)
           // 同时缓存到内存
           this.cacheVoiceWav(cacheKey, wavData)
-          console.log(`[Voice] 文件缓存命中，总耗时: ${Date.now() - startTime}ms`)
+
           return { success: true, data: wavData.toString('base64') }
         } catch (e) {
           console.error('[Voice] 读取缓存文件失败:', e)
@@ -2855,7 +2911,7 @@ class ChatService {
       // 从数据库读取 silk 数据
       const silkData = await this.getVoiceDataFromMediaDb(msgCreateTime, candidates)
       const t4 = Date.now()
-      console.log(`[Voice] getVoiceDataFromMediaDb: ${t4 - t3}ms`)
+
 
       if (!silkData) {
         return { success: false, error: '未找到语音数据 (请确保已在微信中播放过该语音)' }
@@ -2865,7 +2921,7 @@ class ChatService {
       // 使用 silk-wasm 解码
       const pcmData = await this.decodeSilkToPcm(silkData, 24000)
       const t6 = Date.now()
-      console.log(`[Voice] decodeSilkToPcm: ${t6 - t5}ms`)
+
 
       if (!pcmData) {
         return { success: false, error: 'Silk 解码失败' }
@@ -2875,7 +2931,7 @@ class ChatService {
       // PCM -> WAV
       const wavData = this.createWavBuffer(pcmData, 24000)
       const t8 = Date.now()
-      console.log(`[Voice] createWavBuffer: ${t8 - t7}ms`)
+
 
       // 缓存 WAV 数据到内存
       this.cacheVoiceWav(cacheKey, wavData)
@@ -2883,7 +2939,7 @@ class ChatService {
       // 缓存 WAV 数据到文件（异步，不阻塞返回）
       this.cacheVoiceWavToFile(cacheKey, wavData)
 
-      console.log(`[Voice] 总耗时: ${Date.now() - startTime}ms`)
+
       return { success: true, data: wavData.toString('base64') }
     } catch (e) {
       console.error('ChatService: getVoiceData 失败:', e)
@@ -2920,11 +2976,11 @@ class ChatService {
       let mediaDbFiles: string[]
       if (this.mediaDbsCache) {
         mediaDbFiles = this.mediaDbsCache
-        console.log(`[Voice] listMediaDbs (缓存): 0ms`)
+
       } else {
         const mediaDbsResult = await wcdbService.listMediaDbs()
         const t2 = Date.now()
-        console.log(`[Voice] listMediaDbs: ${t2 - t1}ms`)
+
 
         let files = mediaDbsResult.success && mediaDbsResult.data ? (mediaDbsResult.data as string[]) : []
 
@@ -2956,7 +3012,7 @@ class ChatService {
               "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'VoiceInfo%'"
             )
             const t4 = Date.now()
-            console.log(`[Voice] 查询VoiceInfo表: ${t4 - t3}ms`)
+
 
             if (!tablesResult.success || !tablesResult.rows || tablesResult.rows.length === 0) {
               continue
@@ -2969,7 +3025,7 @@ class ChatService {
               `PRAGMA table_info('${voiceTable}')`
             )
             const t6 = Date.now()
-            console.log(`[Voice] 查询表结构: ${t6 - t5}ms`)
+
 
             if (!columnsResult.success || !columnsResult.rows) {
               continue
@@ -3006,7 +3062,7 @@ class ChatService {
               "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Name2Id%'"
             )
             const t8 = Date.now()
-            console.log(`[Voice] 查询Name2Id表: ${t8 - t7}ms`)
+
 
             const name2IdTable = (name2IdTablesResult.success && name2IdTablesResult.rows && name2IdTablesResult.rows.length > 0)
               ? name2IdTablesResult.rows[0].name
@@ -3033,7 +3089,7 @@ class ChatService {
               `SELECT user_name, rowid FROM ${schema.name2IdTable} WHERE user_name IN (${candidatesStr})`
             )
             const t10 = Date.now()
-            console.log(`[Voice] 查询chat_name_id: ${t10 - t9}ms`)
+
 
             if (name2IdResult.success && name2IdResult.rows && name2IdResult.rows.length > 0) {
               // 构建 chat_name_id 列表
@@ -3046,13 +3102,13 @@ class ChatService {
                 `SELECT ${schema.dataColumn} AS data FROM ${schema.voiceTable} WHERE ${schema.chatNameIdColumn} IN (${chatNameIdsStr}) AND ${schema.timeColumn} = ${createTime} LIMIT 1`
               )
               const t12 = Date.now()
-              console.log(`[Voice] 策略1查询语音: ${t12 - t11}ms`)
+
 
               if (voiceResult.success && voiceResult.rows && voiceResult.rows.length > 0) {
                 const row = voiceResult.rows[0]
                 const silkData = this.decodeVoiceBlob(row.data)
                 if (silkData) {
-                  console.log(`[Voice] getVoiceDataFromMediaDb总耗时: ${Date.now() - startTime}ms`)
+
                   return silkData
                 }
               }
@@ -3066,13 +3122,13 @@ class ChatService {
               `SELECT ${schema.dataColumn} AS data FROM ${schema.voiceTable} WHERE ${schema.timeColumn} = ${createTime} LIMIT 1`
             )
             const t14 = Date.now()
-            console.log(`[Voice] 策略2查询语音: ${t14 - t13}ms`)
+
 
             if (voiceResult.success && voiceResult.rows && voiceResult.rows.length > 0) {
               const row = voiceResult.rows[0]
               const silkData = this.decodeVoiceBlob(row.data)
               if (silkData) {
-                console.log(`[Voice] getVoiceDataFromMediaDb总耗时: ${Date.now() - startTime}ms`)
+
                 return silkData
               }
             }
@@ -3085,13 +3141,13 @@ class ChatService {
               `SELECT ${schema.dataColumn} AS data FROM ${schema.voiceTable} WHERE ${schema.timeColumn} BETWEEN ${createTime - 5} AND ${createTime + 5} ORDER BY ABS(${schema.timeColumn} - ${createTime}) LIMIT 1`
             )
             const t16 = Date.now()
-            console.log(`[Voice] 策略3查询语音: ${t16 - t15}ms`)
+
 
             if (voiceResult.success && voiceResult.rows && voiceResult.rows.length > 0) {
               const row = voiceResult.rows[0]
               const silkData = this.decodeVoiceBlob(row.data)
               if (silkData) {
-                console.log(`[Voice] getVoiceDataFromMediaDb总耗时: ${Date.now() - startTime}ms`)
+
                 return silkData
               }
             }
@@ -3322,7 +3378,7 @@ class ChatService {
     senderWxid?: string
   ): Promise<{ success: boolean; transcript?: string; error?: string }> {
     const startTime = Date.now()
-    console.log(`[Transcribe] 开始转写: sessionId=${sessionId}, msgId=${msgId}, createTime=${createTime}`)
+
 
     try {
       let msgCreateTime = createTime
@@ -3333,12 +3389,12 @@ class ChatService {
         const t1 = Date.now()
         const msgResult = await this.getMessageById(sessionId, parseInt(msgId, 10))
         const t2 = Date.now()
-        console.log(`[Transcribe] getMessageById: ${t2 - t1}ms`)
+
 
         if (msgResult.success && msgResult.message) {
           msgCreateTime = msgResult.message.createTime
           serverId = msgResult.message.serverId
-          console.log(`[Transcribe] 获取到 createTime=${msgCreateTime}, serverId=${serverId}`)
+
         }
       }
 
@@ -3349,19 +3405,19 @@ class ChatService {
 
       // 使用正确的 cacheKey（包含 createTime）
       const cacheKey = this.getVoiceCacheKey(sessionId, msgId, msgCreateTime)
-      console.log(`[Transcribe] cacheKey=${cacheKey}`)
+
 
       // 检查转写缓存
       const cached = this.voiceTranscriptCache.get(cacheKey)
       if (cached) {
-        console.log(`[Transcribe] 缓存命中，总耗时: ${Date.now() - startTime}ms`)
+
         return { success: true, transcript: cached }
       }
 
       // 检查是否正在转写
       const pending = this.voiceTranscriptPending.get(cacheKey)
       if (pending) {
-        console.log(`[Transcribe] 正在转写中，等待结果`)
+
         return pending
       }
 
@@ -3370,7 +3426,7 @@ class ChatService {
           // 检查内存中是否有 WAV 数据
           let wavData = this.voiceWavCache.get(cacheKey)
           if (wavData) {
-            console.log(`[Transcribe] WAV内存缓存命中，大小: ${wavData.length} bytes`)
+
           } else {
             // 检查文件缓存
             const voiceCacheDir = this.getVoiceCacheDir()
@@ -3378,7 +3434,7 @@ class ChatService {
             if (existsSync(wavFilePath)) {
               try {
                 wavData = readFileSync(wavFilePath)
-                console.log(`[Transcribe] WAV文件缓存命中，大小: ${wavData.length} bytes`)
+
                 // 同时缓存到内存
                 this.cacheVoiceWav(cacheKey, wavData)
               } catch (e) {
@@ -3388,39 +3444,39 @@ class ChatService {
           }
 
           if (!wavData) {
-            console.log(`[Transcribe] WAV缓存未命中，调用 getVoiceData`)
+
             const t3 = Date.now()
             // 调用 getVoiceData 获取并解码
             const voiceResult = await this.getVoiceData(sessionId, msgId, msgCreateTime, serverId, senderWxid)
             const t4 = Date.now()
-            console.log(`[Transcribe] getVoiceData: ${t4 - t3}ms, success=${voiceResult.success}`)
+
 
             if (!voiceResult.success || !voiceResult.data) {
               console.error(`[Transcribe] 语音解码失败: ${voiceResult.error}`)
               return { success: false, error: voiceResult.error || '语音解码失败' }
             }
             wavData = Buffer.from(voiceResult.data, 'base64')
-            console.log(`[Transcribe] WAV数据大小: ${wavData.length} bytes`)
+
           }
 
           // 转写
-          console.log(`[Transcribe] 开始调用 transcribeWavBuffer`)
+
           const t5 = Date.now()
           const result = await voiceTranscribeService.transcribeWavBuffer(wavData, (text) => {
-            console.log(`[Transcribe] 部分结果: ${text}`)
+
             onPartial?.(text)
           })
           const t6 = Date.now()
-          console.log(`[Transcribe] transcribeWavBuffer: ${t6 - t5}ms, success=${result.success}`)
+
 
           if (result.success && result.transcript) {
-            console.log(`[Transcribe] 转写成功: ${result.transcript}`)
+
             this.cacheVoiceTranscript(cacheKey, result.transcript)
           } else {
             console.error(`[Transcribe] 转写失败: ${result.error}`)
           }
 
-          console.log(`[Transcribe] 总耗时: ${Date.now() - startTime}ms`)
+
           return result
         } catch (error) {
           console.error(`[Transcribe] 异常:`, error)
@@ -3468,7 +3524,7 @@ class ChatService {
     try {
       // 1. 尝试从缓存获取会话表信息
       let tables = this.sessionTablesCache.get(sessionId)
-      
+
       if (!tables) {
         // 缓存未命中，查询数据库
         const tableStats = await wcdbService.getMessageTableStats(sessionId)

@@ -91,7 +91,7 @@ function AnnualReportPage() {
     <div className="annual-report-page">
       <Sparkles size={32} className="header-icon" />
       <h1 className="page-title">年度报告</h1>
-      <p className="page-desc">选择年份，生成你的微信聊天年度回顾</p>
+      <p className="page-desc">选择年份，回顾你在微信里的点点滴滴</p>
 
       <div className="report-sections">
         <section className="report-section">

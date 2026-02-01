@@ -917,7 +917,7 @@ function AnnualReportWindow() {
                 <Avatar url={selfAvatarUrl} name="我" size="lg" />
               </div>
             </div>
-            <p className="hero-desc">只要你想<br />我一直在</p>
+            <p className="hero-desc">你只管说<br />我一直在</p>
           </section>
 
           {/* 双向奔赴 */}
@@ -1025,7 +1025,7 @@ function AnnualReportWindow() {
               </div>
               <p className="hero-desc">
                 其中 <span className="hl">{midnightKing.displayName}</span> 常常在深夜中陪着你。
-                <br />你和Ta的对话占深夜期间聊天的 <span className="gold">{midnightKing.percentage}%</span>。
+                <br />你和Ta的对话占你深夜期间聊天的 <span className="gold">{midnightKing.percentage}%</span>。
               </p>
             </section>
           )}

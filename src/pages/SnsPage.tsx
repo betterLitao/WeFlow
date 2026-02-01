@@ -149,7 +149,7 @@ export default function SnsPage() {
                 const currentPosts = postsRef.current
                 if (currentPosts.length > 0) {
                     const topTs = currentPosts[0].createTime
-                    console.log('[SnsPage] Fetching newer posts starts from:', topTs + 1);
+                    
 
                     const result = await window.electronAPI.sns.getTimeline(
                         limit,
@@ -281,10 +281,10 @@ export default function SnsPage() {
         const checkSchema = async () => {
             try {
                 const schema = await window.electronAPI.chat.execQuery('sns', null, "PRAGMA table_info(SnsTimeLine)");
-                console.log('[SnsPage] SnsTimeLine Schema:', schema);
+                
                 if (schema.success && schema.rows) {
                     const columns = schema.rows.map((r: any) => r.name);
-                    console.log('[SnsPage] Available columns:', columns);
+                    
                 }
             } catch (e) {
                 console.error('[SnsPage] Failed to check schema:', e);
@@ -335,7 +335,7 @@ export default function SnsPage() {
 
         // deltaY < 0 表示向上滚，scrollTop === 0 表示已经在最顶端
         if (e.deltaY < -20 && container.scrollTop <= 0 && hasNewer && !loading && !loadingNewer) {
-            console.log('[SnsPage] Wheel-up detected at top, loading newer posts...');
+            
             loadPosts({ direction: 'newer' })
         }
     }

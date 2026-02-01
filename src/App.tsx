@@ -241,18 +241,18 @@ function App() {
           if (!onboardingDone) {
             await configService.setOnboardingDone(true)
           }
-          console.log('检测到已保存的配置，正在自动连接...')
+          
           const result = await window.electronAPI.chat.connect()
 
           if (result.success) {
-            console.log('自动连接成功')
+            
             setDbConnected(true, dbPath)
             // 如果当前在欢迎页，跳转到首页
             if (window.location.hash === '#/' || window.location.hash === '') {
               navigate('/home')
             }
           } else {
-            console.log('自动连接失败:', result.error)
+            
             // 如果错误信息包含 VC++ 或 DLL 相关内容，不清除配置，只提示用户
             // 其他错误可能需要重新配置
             const errorMsg = result.error || ''

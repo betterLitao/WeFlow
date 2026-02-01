@@ -116,13 +116,13 @@ export class KeyService {
 
       // 检查是否已经有本地副本，如果有就使用它
       if (existsSync(localPath)) {
-        console.log(`使用已存在的 DLL 本地副本: ${localPath}`)
+        
         return localPath
       }
 
-      console.log(`检测到网络路径 DLL，正在复制到本地: ${originalPath} -> ${localPath}`)
+      
       copyFileSync(originalPath, localPath)
-      console.log('DLL 本地化成功')
+      
       return localPath
     } catch (e) {
       console.error('DLL 本地化失败:', e)
@@ -146,7 +146,7 @@ export class KeyService {
 
       // 检查是否为网络路径，如果是则本地化
       if (this.isNetworkPath(dllPath)) {
-        console.log('检测到网络路径，将进行本地化处理')
+        
         dllPath = this.localizeNetworkDll(dllPath)
       }
 
@@ -347,7 +347,7 @@ export class KeyService {
       if (pid) {
         const runPath = await this.getProcessExecutablePath(pid)
         if (runPath && existsSync(runPath)) {
-          console.log('发现正在运行的微信进程，使用路径:', runPath)
+          
           return runPath
         }
       }

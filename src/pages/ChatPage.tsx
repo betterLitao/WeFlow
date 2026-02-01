@@ -286,6 +286,11 @@ function ChatPage(_props: ChatPageProps) {
     setSessions
   ])
 
+  // 同步 currentSessionId 到 ref
+  useEffect(() => {
+    currentSessionRef.current = currentSessionId
+  }, [currentSessionId])
+
   // 加载会话列表（优化：先返回基础数据，异步加载联系人信息）
   const loadSessions = async (options?: { silent?: boolean }) => {
     if (options?.silent) {
@@ -301,6 +306,19 @@ function ChatPage(_props: ChatPageProps) {
         const nextSessions = options?.silent ? mergeSessions(sessionsArray) : sessionsArray
         // 确保 nextSessions 也是数组
         if (Array.isArray(nextSessions)) {
+          // 【核心优化】检查当前会话是否有更新（通过 lastTimestamp 对比）
+          const currentId = currentSessionRef.current
+          if (currentId) {
+            const newSession = nextSessions.find(s => s.username === currentId)
+            const oldSession = sessionsRef.current.find(s => s.username === currentId)
+
+            // 如果会话存在且时间戳变大（有新消息）或者之前没有该会话
+            if (newSession && (!oldSession || newSession.lastTimestamp > oldSession.lastTimestamp)) {
+              console.log(`[Frontend] Detected update for current session ${currentId}, refreshing messages...`)
+              void handleIncrementalRefresh()
+            }
+          }
+
           setSessions(nextSessions)
           // 立即启动联系人信息加载，不再延迟 500ms
           void enrichSessionsContactInfo(nextSessions)
@@ -330,14 +348,14 @@ function ChatPage(_props: ChatPageProps) {
 
     // 防止重复加载
     if (isEnrichingRef.current) {
-      console.log('[性能监控] 联系人信息正在加载中，跳过重复请求')
+
       return
     }
 
     isEnrichingRef.current = true
     enrichCancelledRef.current = false
 
-    console.log(`[性能监控] 开始加载联系人信息，会话数: ${sessions.length}`)
+
     const totalStart = performance.now()
 
     // 移除初始 500ms 延迟，让后台加载与 UI 渲染并行
@@ -352,12 +370,12 @@ function ChatPage(_props: ChatPageProps) {
       // 找出需要加载联系人信息的会话（没有头像或者没有显示名称的）
       const needEnrich = sessions.filter(s => !s.avatarUrl || !s.displayName || s.displayName === s.username)
       if (needEnrich.length === 0) {
-        console.log('[性能监控] 所有联系人信息已缓存，跳过加载')
+
         isEnrichingRef.current = false
         return
       }
 
-      console.log(`[性能监控] 需要加载的联系人信息: ${needEnrich.length} 个`)
+
 
       // 进一步减少批次大小，每批3个，避免DLL调用阻塞
       const batchSize = 3
@@ -366,7 +384,7 @@ function ChatPage(_props: ChatPageProps) {
       for (let i = 0; i < needEnrich.length; i += batchSize) {
         // 如果正在滚动，暂停加载
         if (isScrollingRef.current) {
-          console.log('[性能监控] 检测到滚动，暂停加载联系人信息')
+
           // 等待滚动结束
           while (isScrollingRef.current && !enrichCancelledRef.current) {
             await new Promise(resolve => setTimeout(resolve, 200))
@@ -410,9 +428,9 @@ function ChatPage(_props: ChatPageProps) {
 
       const totalTime = performance.now() - totalStart
       if (!enrichCancelledRef.current) {
-        console.log(`[性能监控] 联系人信息加载完成，总耗时: ${totalTime.toFixed(2)}ms, 已加载: ${loadedCount}/${needEnrich.length}`)
+
       } else {
-        console.log(`[性能监控] 联系人信息加载被取消，已加载: ${loadedCount}/${needEnrich.length}`)
+
       }
     } catch (e) {
       console.error('加载联系人信息失败:', e)
@@ -514,7 +532,7 @@ function ChatPage(_props: ChatPageProps) {
 
           // 如果是自己的信息且当前个人头像为空，同步更新
           if (myWxid && username === myWxid && contact.avatarUrl && !myAvatarUrl) {
-            console.log('[ChatPage] 从联系人同步获取到个人头像')
+
             setMyAvatarUrl(contact.avatarUrl)
           }
 
@@ -542,6 +560,50 @@ function ChatPage(_props: ChatPageProps) {
 
   // 刷新当前会话消息（增量更新新消息）
   const [isRefreshingMessages, setIsRefreshingMessages] = useState(false)
+
+  /**
+   * 极速增量刷新：基于最后一条消息时间戳，获取后续新消息
+   * (由用户建议：记住上一条消息时间，自动取之后的并渲染，然后后台兜底全量同步)
+   */
+  const handleIncrementalRefresh = async () => {
+    if (!currentSessionId || isRefreshingMessages) return
+
+    // 找出当前已渲染消息中的最大时间戳
+    const lastMsg = messages[messages.length - 1]
+    const minTime = lastMsg?.createTime || 0
+
+    // 1. 优先执行增量查询并渲染（第一步）
+    try {
+      const result = await (window.electronAPI.chat as any).getNewMessages(currentSessionId, minTime) as {
+        success: boolean;
+        messages?: Message[];
+        error?: string
+      }
+
+      if (result.success && result.messages && result.messages.length > 0) {
+        // 过滤去重
+        const existingKeys = new Set(messages.map(getMessageKey))
+        const newOnes = result.messages.filter(m => !existingKeys.has(getMessageKey(m)))
+
+        if (newOnes.length > 0) {
+          appendMessages(newOnes, false)
+          flashNewMessages(newOnes.map(getMessageKey))
+          // 滚动到底部
+          requestAnimationFrame(() => {
+            if (messageListRef.current) {
+              messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+            }
+          })
+        }
+      }
+    } catch (e) {
+      console.warn('[IncrementalRefresh] 失败，将依赖全量同步兜底:', e)
+    }
+
+    // 2. 后台兜底：执行之前的完整游标刷新，确保没有遗漏（比如跨库的消息）
+    void handleRefreshMessages()
+  }
+
   const handleRefreshMessages = async () => {
     if (!currentSessionId || isRefreshingMessages) return
     setJumpStartTime(0)
@@ -584,6 +646,31 @@ function ChatPage(_props: ChatPageProps) {
     }
   }
 
+  // 监听数据库变更实时刷新
+  useEffect(() => {
+    const handleDbChange = (_event: any, data: { type: string; json: string }) => {
+      try {
+        const payload = JSON.parse(data.json)
+        const tableName = payload.table
+
+        // 会话列表更新（主要靠这个触发，因为 wcdb_api 已经只监控 session 了）
+        if (tableName === 'Session' || tableName === 'session') {
+          void loadSessions({ silent: true })
+        }
+      } catch (e) {
+        console.error('解析数据库变更通知失败:', e)
+      }
+    }
+
+    if (window.electronAPI.chat.onWcdbChange) {
+      const removeListener = window.electronAPI.chat.onWcdbChange(handleDbChange)
+      return () => {
+        removeListener()
+      }
+    }
+    return () => { }
+  }, [loadSessions, handleRefreshMessages])
+
   // 加载消息
   const loadMessages = async (sessionId: string, offset = 0, startTime = 0, endTime = 0) => {
     const listEl = messageListRef.current
@@ -621,7 +708,7 @@ function ChatPage(_props: ChatPageProps) {
               .map(m => m.senderUsername as string)
             )]
             if (unknownSenders.length > 0) {
-              console.log(`[性能监控] 预取消息发送者信息: ${unknownSenders.length} 个`)
+
               // 在批量请求前，先将这些发送者标记为加载中，防止 MessageBubble 触发重复请求
               const batchPromise = loadContactInfoBatch(unknownSenders)
               unknownSenders.forEach(username => {
@@ -1549,23 +1636,13 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
   useEffect(() => {
     if (!isVideo) return
 
-    console.log('[Video Debug] Full message object:', JSON.stringify(message, null, 2))
-    console.log('[Video Debug] Message keys:', Object.keys(message))
-    console.log('[Video Debug] Message:', {
-      localId: message.localId,
-      localType: message.localType,
-      hasVideoMd5: !!message.videoMd5,
-      hasContent: !!message.content,
-      hasParsedContent: !!message.parsedContent,
-      hasRawContent: !!(message as any).rawContent,
-      contentPreview: message.content?.substring(0, 200),
-      parsedContentPreview: message.parsedContent?.substring(0, 200),
-      rawContentPreview: (message as any).rawContent?.substring(0, 200)
-    })
+
+
+
 
     // 优先使用数据库中的 videoMd5
     if (message.videoMd5) {
-      console.log('[Video Debug] Using videoMd5 from message:', message.videoMd5)
+
       setVideoMd5(message.videoMd5)
       return
     }
@@ -1573,11 +1650,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
     // 尝试从多个可能的字段获取原始内容
     const contentToUse = message.content || (message as any).rawContent || message.parsedContent
     if (contentToUse) {
-      console.log('[Video Debug] Parsing MD5 from content, length:', contentToUse.length)
+
       window.electronAPI.video.parseVideoMd5(contentToUse).then((result: { success: boolean; md5?: string; error?: string }) => {
-        console.log('[Video Debug] Parse result:', result)
+
         if (result && result.success && result.md5) {
-          console.log('[Video Debug] Parsed MD5:', result.md5)
+
           setVideoMd5(result.md5)
         } else {
           console.error('[Video Debug] Failed to parse MD5:', result)
@@ -2061,11 +2138,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
         String(message.localId),
         message.createTime
       )
-      console.log('[ChatPage] 调用转写:', {
-        sessionId: session.username,
-        msgId: message.localId,
-        createTime: message.createTime
-      })
+
       if (result.success) {
         const transcriptText = (result.transcript || '').trim()
         voiceTranscriptCache.set(voiceTranscriptCacheKey, transcriptText)
@@ -2138,14 +2211,14 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
   useEffect(() => {
     if (!isVideo || !isVideoVisible || videoInfo || videoLoading) return
     if (!videoMd5) {
-      console.log('[Video Debug] No videoMd5 available yet')
+
       return
     }
 
-    console.log('[Video Debug] Loading video info for MD5:', videoMd5)
+
     setVideoLoading(true)
     window.electronAPI.video.getVideoInfo(videoMd5).then((result: { success: boolean; exists: boolean; videoUrl?: string; coverUrl?: string; thumbUrl?: string; error?: string }) => {
-      console.log('[Video Debug] getVideoInfo result:', result)
+
       if (result && result.success) {
         setVideoInfo({
           exists: result.exists,
@@ -2642,7 +2715,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
         const fileName = message.fileName || title || '文件'
         const fileSize = message.fileSize
         const fileExt = message.fileExt || fileName.split('.').pop()?.toLowerCase() || ''
-        
+
         // 根据扩展名选择图标
         const getFileIcon = () => {
           const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']
@@ -2662,7 +2735,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
             </svg>
           )
         }
-        
+
         return (
           <div className="file-message">
             <div className="file-icon">
@@ -2682,10 +2755,10 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
       if (appMsgType === '2000') {
         try {
           const content = message.rawContent || message.content || message.parsedContent || ''
-          
+
           // 添加调试日志
-          console.log('[Transfer Debug] Raw content:', content.substring(0, 500))
-          
+
+
           const parser = new DOMParser()
           const doc = parser.parseFromString(content, 'text/xml')
 
@@ -2693,11 +2766,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
           const payMemo = doc.querySelector('pay_memo')?.textContent || ''
           const paysubtype = doc.querySelector('paysubtype')?.textContent || '1'
 
-          console.log('[Transfer Debug] Parsed:', { feedesc, payMemo, paysubtype, title })
+
 
           // paysubtype: 1=待收款, 3=已收款
           const isReceived = paysubtype === '3'
-          
+
           // 如果 feedesc 为空，使用 title 作为降级
           const displayAmount = feedesc || title || '微信转账'
 
@@ -2743,7 +2816,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, o
           <div className="miniapp-message">
             <div className="miniapp-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
               </svg>
             </div>
             <div className="miniapp-info">

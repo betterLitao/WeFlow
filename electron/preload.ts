@@ -111,6 +111,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('chat:getMessages', sessionId, offset, limit, startTime, endTime, ascending),
     getLatestMessages: (sessionId: string, limit?: number) =>
       ipcRenderer.invoke('chat:getLatestMessages', sessionId, limit),
+    getNewMessages: (sessionId: string, minTime: number, limit?: number) =>
+      ipcRenderer.invoke('chat:getNewMessages', sessionId, minTime, limit),
     getContact: (username: string) => ipcRenderer.invoke('chat:getContact', username),
     getContactAvatar: (username: string) => ipcRenderer.invoke('chat:getContactAvatar', username),
     getMyAvatarUrl: () => ipcRenderer.invoke('chat:getMyAvatarUrl'),
@@ -132,7 +134,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('chat:execQuery', kind, path, sql),
     getContacts: () => ipcRenderer.invoke('chat:getContacts'),
     getMessage: (sessionId: string, localId: number) =>
-      ipcRenderer.invoke('chat:getMessage', sessionId, localId)
+      ipcRenderer.invoke('chat:getMessage', sessionId, localId),
+    onWcdbChange: (callback: (event: any, data: { type: string; json: string }) => void) => {
+      ipcRenderer.on('wcdb-change', callback)
+      return () => ipcRenderer.removeListener('wcdb-change', callback)
+    }
   },
 
 

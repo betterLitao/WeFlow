@@ -380,9 +380,9 @@ export class ImageDecryptService {
     }
 
     const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
-    if (suffixMatch) return suffixMatch[1]
-
-    return trimmed
+    const cleaned = suffixMatch ? suffixMatch[1] : trimmed
+    
+    return cleaned
   }
 
   private async resolveDatPath(
@@ -1136,7 +1136,7 @@ export class ImageDecryptService {
       // 扫描所有可能的缓存根目录
       const allRoots = this.getAllCacheRoots()
       this.logInfo('开始索引缓存', { roots: allRoots.length })
-      
+
       for (const root of allRoots) {
         try {
           this.indexCacheDir(root, 3, 0) // 增加深度到3，支持 sessionId/YYYY-MM 结构
@@ -1144,7 +1144,7 @@ export class ImageDecryptService {
           this.logError('索引目录失败', e, { root })
         }
       }
-      
+
       this.logInfo('缓存索引完成', { entries: this.resolvedCache.size })
       this.cacheIndexed = true
       this.cacheIndexing = null
@@ -1175,7 +1175,7 @@ export class ImageDecryptService {
     // 默认路径
     roots.push(join(documentsPath, 'WeFlow', 'Images'))
     roots.push(join(documentsPath, 'WeFlow', 'images'))
-    
+
     // 兼容旧路径（如果有的话）
     roots.push(join(documentsPath, 'WeFlowData', 'Images'))
 

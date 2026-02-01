@@ -724,6 +724,10 @@ function registerIpcHandlers() {
     return chatService.getLatestMessages(sessionId, limit)
   })
 
+  ipcMain.handle('chat:getNewMessages', async (_, sessionId: string, minTime: number, limit?: number) => {
+    return chatService.getNewMessages(sessionId, minTime, limit)
+  })
+
   ipcMain.handle('chat:getContact', async (_, username: string) => {
     return await chatService.getContact(username)
   })
@@ -1170,7 +1174,7 @@ function checkForUpdatesOnStartup() {
           // 检查该版本是否被用户忽略
           const ignoredVersion = configService?.get('ignoredUpdateVersion')
           if (ignoredVersion === latestVersion) {
-            console.log(`版本 ${latestVersion} 已被用户忽略,跳过更新提示`)
+
             return
           }
 

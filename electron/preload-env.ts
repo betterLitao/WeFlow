@@ -29,7 +29,7 @@ function enforceLocalDllPriority() {
         process.env.PATH = dllPaths
     }
 
-    console.log('[WeFlow] Environment PATH updated to enforce local DLL priority:', dllPaths)
+    
 }
 
 try {

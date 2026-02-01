@@ -115,8 +115,9 @@ class AnnualReportService {
       return trimmed
     }
     const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
-    if (suffixMatch) return suffixMatch[1]
-    return trimmed
+    const cleaned = suffixMatch ? suffixMatch[1] : trimmed
+    
+    return cleaned
   }
 
   private async ensureConnectedWithConfig(
@@ -596,8 +597,21 @@ class AnnualReportService {
                 if (!createTime) continue
 
                 const isSendRaw = row.computed_is_send ?? row.is_send ?? '0'
-                const isSent = parseInt(isSendRaw, 10) === 1
+                let isSent = parseInt(isSendRaw, 10) === 1
                 const localType = parseInt(row.local_type || row.type || '1', 10)
+
+                // 兼容逻辑
+                if (isSendRaw === undefined || isSendRaw === null || isSendRaw === '0') {
+                  const sender = String(row.sender_username || row.sender || row.talker || '').toLowerCase()
+                  if (sender) {
+                    const rawLower = rawWxid.toLowerCase()
+                    const cleanedLower = cleanedWxid.toLowerCase()
+                    if (sender === rawLower || sender === cleanedLower ||
+                      rawLower.startsWith(sender + '_') || cleanedLower.startsWith(sender + '_')) {
+                      isSent = true
+                    }
+                  }
+                }
 
                 // 响应速度 & 对话发起
                 if (!conversationStarts.has(sessionId)) {

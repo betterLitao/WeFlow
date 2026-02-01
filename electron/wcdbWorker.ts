@@ -19,6 +19,16 @@ if (parentPort) {
                     core.setLogEnabled(payload.enabled)
                     result = { success: true }
                     break
+                case 'setMonitor':
+                    core.setMonitor((type, json) => {
+                        parentPort!.postMessage({
+                            id: -1,
+                            type: 'monitor',
+                            payload: { type, json }
+                        })
+                    })
+                    result = { success: true }
+                    break
                 case 'testConnection':
                     result = await core.testConnection(payload.dbPath, payload.hexKey, payload.wxid)
                     break
@@ -37,6 +47,9 @@ if (parentPort) {
                     break
                 case 'getMessages':
                     result = await core.getMessages(payload.sessionId, payload.limit, payload.offset)
+                    break
+                case 'getNewMessages':
+                    result = await core.getNewMessages(payload.sessionId, payload.minTime, payload.limit)
                     break
                 case 'getMessageCount':
                     result = await core.getMessageCount(payload.sessionId)

@@ -77,6 +77,11 @@ export interface ElectronAPI {
       messages?: Message[]
       error?: string
     }>
+    getNewMessages: (sessionId: string, minTime: number, limit?: number) => Promise<{
+      success: boolean
+      messages?: Message[]
+      error?: string
+    }>
     getContact: (username: string) => Promise<Contact | null>
     getContactAvatar: (username: string) => Promise<{ avatarUrl?: string; displayName?: string } | null>
     getContacts: () => Promise<{
@@ -110,6 +115,7 @@ export interface ElectronAPI {
     onVoiceTranscriptPartial: (callback: (payload: { msgId: string; text: string }) => void) => () => void
     execQuery: (kind: string, path: string | null, sql: string) => Promise<{ success: boolean; rows?: any[]; error?: string }>
     getMessage: (sessionId: string, localId: number) => Promise<{ success: boolean; message?: Message; error?: string }>
+    onWcdbChange: (callback: (event: any, data: { type: string; json: string }) => void) => () => void
   }
 
   image: {

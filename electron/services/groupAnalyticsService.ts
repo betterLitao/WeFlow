@@ -79,8 +79,13 @@ class GroupAnalyticsService {
     if (trimmed.toLowerCase().startsWith('wxid_')) {
       const match = trimmed.match(/^(wxid_[^_]+)/i)
       if (match) return match[1]
+      return trimmed
     }
-    return trimmed
+
+    const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
+    const cleaned = suffixMatch ? suffixMatch[1] : trimmed
+    
+    return cleaned
   }
 
   private async ensureConnected(): Promise<{ success: boolean; error?: string }> {

@@ -157,8 +157,9 @@ class ExportService {
       return trimmed
     }
     const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
-    if (suffixMatch) return suffixMatch[1]
-    return trimmed
+    const cleaned = suffixMatch ? suffixMatch[1] : trimmed
+    
+    return cleaned
   }
 
   private async ensureConnected(): Promise<{ success: boolean; cleanedWxid?: string; error?: string }> {
@@ -968,11 +969,11 @@ class ExportService {
       const emojiMd5 = msg.emojiMd5
 
       if (!emojiUrl && !emojiMd5) {
-        console.log('[ExportService] 表情消息缺少 url 和 md5, localId:', msg.localId, 'content:', msg.content?.substring(0, 200))
+        
         return null
       }
 
-      console.log('[ExportService] 导出表情:', { localId: msg.localId, emojiMd5, emojiUrl: emojiUrl?.substring(0, 100) })
+      
 
       const key = emojiMd5 || String(msg.localId)
       // 根据 URL 判断扩展名

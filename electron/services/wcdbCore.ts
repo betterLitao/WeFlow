@@ -60,6 +60,10 @@ export class WcdbCore {
   private wcdbGetSnsTimeline: any = null
   private wcdbGetSnsAnnualStats: any = null
   private wcdbVerifyUser: any = null
+  private wcdbStartMonitorPipe: any = null
+  private wcdbStopMonitorPipe: any = null
+  private monitorPipeClient: any = null
+
   private avatarUrlCache: Map<string, { url?: string; updatedAt: number }> = new Map()
   private readonly avatarCacheTtlMs = 10 * 60 * 1000
   private logTimer: NodeJS.Timeout | null = null
@@ -77,6 +81,136 @@ export class WcdbCore {
     } else {
       this.stopLogPolling()
     }
+  }
+
+  // 使用命名管道 IPC
+  startMonitor(callback: (type: string, json: string) => void): boolean {
+    if (!this.wcdbStartMonitorPipe) {
+      this.writeLog('startMonitor: wcdbStartMonitorPipe not available')
+      return false
+    }
+
+    try {
+      const result = this.wcdbStartMonitorPipe()
+      if (result !== 0) {
+        this.writeLog(`startMonitor: wcdbStartMonitorPipe failed with ${result}`)
+        return false
+      }
+
+      const net = require('net')
+      const PIPE_PATH = '\\\\.\\pipe\\weflow_monitor'
+
+      setTimeout(() => {
+        this.monitorPipeClient = net.createConnection(PIPE_PATH, () => {
+          this.writeLog('Monitor pipe connected')
+        })
+
+        let buffer = ''
+        this.monitorPipeClient.on('data', (data: Buffer) => {
+          buffer += data.toString('utf8')
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const parsed = JSON.parse(line)
+                callback(parsed.action || 'update', line)
+              } catch {
+                callback('update', line)
+              }
+            }
+          }
+        })
+
+        this.monitorPipeClient.on('error', (err: Error) => {
+          this.writeLog(`Monitor pipe error: ${err.message}`)
+        })
+
+        this.monitorPipeClient.on('close', () => {
+          this.writeLog('Monitor pipe closed')
+          this.monitorPipeClient = null
+        })
+      }, 100)
+
+      this.writeLog('Monitor started via named pipe IPC')
+      return true
+    } catch (e) {
+      console.error('startMonitor failed:', e)
+      return false
+    }
+  }
+
+  stopMonitor(): void {
+    if (this.monitorPipeClient) {
+      this.monitorPipeClient.destroy()
+      this.monitorPipeClient = null
+    }
+    if (this.wcdbStopMonitorPipe) {
+      this.wcdbStopMonitorPipe()
+    }
+  }
+
+  // 保留旧方法签名以兼容
+  setMonitor(callback: (type: string, json: string) => void): boolean {
+    return this.startMonitor(callback)
+  }
+
+  /**
+   * 获取指定时间之后的新消息（增量更新）
+   */
+  getNewMessages(sessionId: string, minTime: number, limit: number = 1000): { success: boolean; messages?: any[]; error?: string } {
+    if (!this.handle || !this.wcdbOpenMessageCursorLite || !this.wcdbFetchMessageBatch || !this.wcdbCloseMessageCursor) {
+      return { success: false, error: 'Database not handled or functions missing' }
+    }
+
+    // 1. Open Cursor
+    const cursorPtr = Buffer.alloc(8) // int64*
+    // wcdb_open_message_cursor_lite(handle, sessionId, batchSize, ascending, beginTime, endTime, outCursor)
+    // ascending=1 (ASC) to get messages AFTER minTime ordered by time
+    // beginTime = minTime + 1 (to avoid duplicate of the last message)
+    // Actually, let's use minTime, user logic might handle duplication or we just pass strictly greater
+    // C++ logic: create_time >= beginTimestamp. So if we want new messages, passing lastTimestamp + 1 is safer.
+    const openRes = this.wcdbOpenMessageCursorLite(this.handle, sessionId, limit, 1, minTime, 0, cursorPtr)
+
+    if (openRes !== 0) {
+      return { success: false, error: `Open cursor failed: ${openRes}` }
+    }
+
+    // Read int64 from buffer
+    const cursor = cursorPtr.readBigInt64LE(0)
+
+    // 2. Fetch Batch
+    const outJsonPtr = Buffer.alloc(8) // void**
+    const outHasMorePtr = Buffer.alloc(4) // int32*
+
+    // fetch_message_batch(handle, cursor, outJson, outHasMore)
+    const fetchRes = this.wcdbFetchMessageBatch(this.handle, cursor, outJsonPtr, outHasMorePtr)
+
+    let messages: any[] = []
+    if (fetchRes === 0) {
+      const jsonPtr = outJsonPtr.readBigInt64LE(0) // void* address
+      if (jsonPtr !== 0n) {
+        // koffi decode string
+        const jsonStr = this.koffi.decode(jsonPtr, 'string')
+        this.wcdbFreeString(jsonPtr) // Must free
+        if (jsonStr) {
+          try {
+            messages = JSON.parse(jsonStr)
+          } catch (e) {
+            console.error('Parse messages failed', e)
+          }
+        }
+      }
+    }
+
+    // 3. Close Cursor
+    this.wcdbCloseMessageCursor(this.handle, cursor)
+
+    if (fetchRes !== 0) {
+      return { success: false, error: `Fetch batch failed: ${fetchRes}` }
+    }
+
+    return { success: true, messages }
   }
 
   /**
@@ -122,7 +256,7 @@ export class WcdbCore {
     if (!force && !this.isLogEnabled()) return
     const line = `[${new Date().toISOString()}] ${message}`
     // 同时输出到控制台和文件
-    console.log('[WCDB]', message)
+
     try {
       const base = this.userDataPath || process.env.WCDB_LOG_DIR || process.cwd()
       const dir = join(base, 'logs')
@@ -262,10 +396,10 @@ export class WcdbCore {
         let protectionOk = false
         for (const resPath of resourcePaths) {
           try {
-            // console.log(`[WCDB] 尝试 InitProtection: ${resPath}`)
+            // 
             protectionOk = this.wcdbInitProtection(resPath)
             if (protectionOk) {
-              // console.log(`[WCDB] InitProtection 成功: ${resPath}`)
+              // 
               break
             }
           } catch (e) {
@@ -452,6 +586,17 @@ export class WcdbCore {
         this.wcdbGetSnsAnnualStats = this.lib.func('int32 wcdb_get_sns_annual_stats(int64 handle, int32 begin, int32 end, _Out_ void** outJson)')
       } catch {
         this.wcdbGetSnsAnnualStats = null
+      }
+
+      // Named pipe IPC for monitoring (replaces callback)
+      try {
+        this.wcdbStartMonitorPipe = this.lib.func('int32 wcdb_start_monitor_pipe()')
+        this.wcdbStopMonitorPipe = this.lib.func('void wcdb_stop_monitor_pipe()')
+        this.writeLog('Monitor pipe functions loaded')
+      } catch (e) {
+        console.warn('Failed to load monitor pipe functions:', e)
+        this.wcdbStartMonitorPipe = null
+        this.wcdbStopMonitorPipe = null
       }
 
       // void VerifyUser(int64_t hwnd_ptr, const char* message, char* out_result, int max_len)

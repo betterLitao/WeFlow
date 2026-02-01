@@ -57,15 +57,11 @@ class SnsService {
     }
 
     async getTimeline(limit: number = 20, offset: number = 0, usernames?: string[], keyword?: string, startTime?: number, endTime?: number): Promise<{ success: boolean; timeline?: SnsPost[]; error?: string }> {
-        console.log('[SnsService] getTimeline called with:', { limit, offset, usernames, keyword, startTime, endTime })
+        
 
         const result = await wcdbService.getSnsTimeline(limit, offset, usernames, keyword, startTime, endTime)
 
-        console.log('[SnsService] getSnsTimeline result:', {
-            success: result.success,
-            timelineCount: result.timeline?.length,
-            error: result.error
-        })
+        
 
         if (result.success && result.timeline) {
             const enrichedTimeline = result.timeline.map((post: any, index: number) => {
@@ -121,11 +117,11 @@ class SnsService {
                 }
             })
 
-            console.log('[SnsService] Returning enriched timeline with', enrichedTimeline.length, 'posts')
+            
             return { ...result, timeline: enrichedTimeline }
         }
 
-        console.log('[SnsService] Returning result:', result)
+        
         return result
     }
     async debugResource(url: string): Promise<{ success: boolean; status?: number; headers?: any; error?: string }> {

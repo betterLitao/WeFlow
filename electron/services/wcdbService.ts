@@ -23,6 +23,7 @@ export class WcdbService {
   private resourcesPath: string | null = null
   private userDataPath: string | null = null
   private logEnabled = false
+  private monitorListener: ((type: string, json: string) => void) | null = null
 
   constructor() {
     this.initWorker()
@@ -47,8 +48,16 @@ export class WcdbService {
     try {
       this.worker = new Worker(finalPath)
 
-      this.worker.on('message', (msg: WorkerMessage) => {
-        const { id, result, error } = msg
+      this.worker.on('message', (msg: any) => {
+        const { id, result, error, type, payload } = msg
+
+        if (type === 'monitor') {
+          if (this.monitorListener) {
+            this.monitorListener(payload.type, payload.json)
+          }
+          return
+        }
+
         const p = this.pending.get(id)
         if (p) {
           this.pending.delete(id)
@@ -123,6 +132,15 @@ export class WcdbService {
   }
 
   /**
+   * 设置数据库监控回调
+   */
+  setMonitor(callback: (type: string, json: string) => void): void {
+    this.monitorListener = callback;
+    // Notify worker to enable monitor
+    this.callWorker('setMonitor').catch(() => { });
+  }
+
+  /**
    * 检查服务是否就绪
    */
   isReady(): boolean {
@@ -185,6 +203,13 @@ export class WcdbService {
    */
   async getMessages(sessionId: string, limit: number, offset: number): Promise<{ success: boolean; messages?: any[]; error?: string }> {
     return this.callWorker('getMessages', { sessionId, limit, offset })
+  }
+
+  /**
+   * 获取新消息（增量刷新）
+   */
+  async getNewMessages(sessionId: string, minTime: number, limit: number = 1000): Promise<{ success: boolean; messages?: any[]; error?: string }> {
+    return this.callWorker('getNewMessages', { sessionId, minTime, limit })
   }
 
   /**
