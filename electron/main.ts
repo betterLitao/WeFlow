@@ -771,6 +771,15 @@ function registerIpcHandlers() {
     return true
   })
 
+  ipcMain.handle('wcdb:checkHealth', async () => {
+    try {
+      const result = await wcdbService.checkHealth()
+      return result
+    } catch (e) {
+      return { success: false, error: `健康检查异常: ${String(e)}` }
+    }
+  })
+
 
 
   // 聊天相关

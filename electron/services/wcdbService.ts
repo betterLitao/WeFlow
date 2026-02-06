@@ -147,6 +147,14 @@ export class WcdbService {
     return !!this.worker
   }
 
+  /**
+   * 健康检查：提前检测 DLL 是否能正常加载
+   * 用于在欢迎页第一步就发现问题，而不是等到最后一步才崩溃
+   */
+  async checkHealth(): Promise<{ success: boolean; error?: string; message?: string }> {
+    return this.callWorker('checkHealth')
+  }
+
   // ==========================================
   // 代理方法 (Proxy Methods)
   // ==========================================

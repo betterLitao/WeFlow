@@ -6,7 +6,7 @@ import * as configService from '../services/config'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, Database, Eye, EyeOff,
   FolderOpen, FolderSearch, KeyRound, ShieldCheck, Sparkles,
-  UserRound, Wand2, Minus, X, HardDrive, RotateCcw
+  UserRound, Wand2, Minus, X, HardDrive, RotateCcw, AlertTriangle, Loader2
 } from 'lucide-react'
 import './WelcomePage.scss'
 
@@ -49,6 +49,10 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
   const [imageKeyStatus, setImageKeyStatus] = useState('')
   const [isManualStartPrompt, setIsManualStartPrompt] = useState(false)
 
+  // 健康检查相关 state
+  const [healthStatus, setHealthStatus] = useState<'idle' | 'checking' | 'success' | 'error'>('idle')
+  const [healthError, setHealthError] = useState('')
+
   // 安全相关 state
   const [enableAuth, setEnableAuth] = useState(false)
   const [authPassword, setAuthPassword] = useState('')
@@ -63,6 +67,30 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
       void PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(setHelloAvailable)
     }
   }, [])
+
+  // 进入欢迎页时自动执行健康检查
+  useEffect(() => {
+    if (stepIndex === 0 && healthStatus === 'idle') {
+      handleHealthCheck()
+    }
+  }, [stepIndex])
+
+  const handleHealthCheck = async () => {
+    setHealthStatus('checking')
+    setHealthError('')
+    try {
+      const result = await window.electronAPI.wcdb.checkHealth()
+      if (result.success) {
+        setHealthStatus('success')
+      } else {
+        setHealthStatus('error')
+        setHealthError(result.error || 'DLL 加载失败')
+      }
+    } catch (e) {
+      setHealthStatus('error')
+      setHealthError(`健康检查异常: ${e}`)
+    }
+  }
 
   async function sha256(message: string) {
     const msgBuffer = new TextEncoder().encode(message)
@@ -361,8 +389,12 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     setLoading(true, '正在连接数据库...')
 
     try {
+      console.log('[WelcomePage] 开始测试连接', { dbPath, wxid })
+      debugger
       const result = await window.electronAPI.wcdb.testConnection(dbPath, decryptKey, wxid)
+      console.log('[WelcomePage] 测试连接结果', result)
       if (!result.success) {
+        console.error('[WelcomePage] 连接失败', result.error)
         setError(result.error || 'WCDB 连接失败')
         setLoading(false)
         return
@@ -535,7 +567,60 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
           <div className="content-body">
             {currentStep.id === 'intro' && (
               <div className="intro-block">
-                {/* 内容移至底部 */}
+                {/* 健康检查状态 */}
+                <div className="health-check-section" style={{ marginBottom: 24 }}>
+                  <div className="health-check-header" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <span style={{ fontWeight: 500 }}>环境检测</span>
+                    {healthStatus === 'checking' && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: 14 }}>
+                        <Loader2 size={14} className="spin" /> 检测中...
+                      </span>
+                    )}
+                    {healthStatus === 'success' && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#52c41a', fontSize: 14 }}>
+                        <CheckCircle2 size={14} /> 环境正常
+                      </span>
+                    )}
+                    {healthStatus === 'error' && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ff4d4f', fontSize: 14 }}>
+                        <AlertTriangle size={14} /> 检测失败
+                      </span>
+                    )}
+                  </div>
+
+                  {healthStatus === 'error' && (
+                    <div className="health-error" style={{
+                      padding: 16,
+                      backgroundColor: 'rgba(255, 77, 79, 0.1)',
+                      borderRadius: 8,
+                      border: '1px solid rgba(255, 77, 79, 0.3)'
+                    }}>
+                      <div style={{ color: '#ff4d4f', marginBottom: 12, fontWeight: 500 }}>
+                        <AlertTriangle size={16} style={{ verticalAlign: 'middle', marginRight: 8 }} />
+                        运行环境异常
+                      </div>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 12 }}>
+                        {healthError}
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
+                        <p style={{ margin: '0 0 8px 0' }}>可能的解决方案：</p>
+                        <ol style={{ margin: 0, paddingLeft: 20 }}>
+                          <li>安装 <a href="https://aka.ms/vs/17/release/vc_redist.x64.exe" target="_blank" rel="noopener" style={{ color: '#1890ff' }}>Visual C++ Redistributable (x64)</a></li>
+                          <li>安装 <a href="https://aka.ms/vs/17/release/vc_redist.x86.exe" target="_blank" rel="noopener" style={{ color: '#1890ff' }}>Visual C++ Redistributable (x86)</a></li>
+                          <li>安装 Visual Studio 并勾选"使用 C++ 的桌面开发"</li>
+                          <li>重启电脑后再试</li>
+                        </ol>
+                      </div>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleHealthCheck}
+                        style={{ marginTop: 16 }}
+                      >
+                        重新检测
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

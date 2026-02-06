@@ -99,7 +99,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     open: (dbPath: string, hexKey: string, wxid: string) =>
       ipcRenderer.invoke('wcdb:open', dbPath, hexKey, wxid),
     close: () => ipcRenderer.invoke('wcdb:close'),
-
+    checkHealth: () => ipcRenderer.invoke('wcdb:checkHealth'),
   },
 
   // 密钥获取
